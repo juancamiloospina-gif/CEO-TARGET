@@ -101,8 +101,9 @@ function App() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [analysisReady, setAnalysisReady] = useState(false);
 
-  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setAnalysisError(null); setIsSubmitting(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
+  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setAnalysisError(null); setIsSubmitting(false); setAnalysisReady(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
 
   const handleAnalyze = async () => {
     setAnalysisError(null);
@@ -148,7 +149,14 @@ function App() {
     }
 
     setProfileContent(content);
-    setIsSubmitting(true);
+    setResult(null);
+    setAnalysisReady(false);
+    // Pasamos a la pantalla de diagnostico DE INMEDIATO (antes de esperar la
+    // respuesta de Claude). El unico costo real de un cliente durante una
+    // demo es sentir que el clic "no hizo nada": la llamada a la IA (que
+    // puede tardar varios segundos) ahora ocurre DENTRO de la pantalla de
+    // "Analizando", nunca antes de mostrarla.
+    setStage('analyzing');
     try {
       const claudeOutcome = await analyzeProfileWithClaude(content, industry);
       const score = claudeOutcome
@@ -159,9 +167,9 @@ function App() {
           })
         : analyzeProfile(content, industry);
       setResult(score);
-      setStage('analyzing');
     } finally {
       setIsSubmitting(false);
+      setAnalysisReady(true);
     }
   };
 
@@ -183,7 +191,7 @@ function App() {
       </header>
 
       {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} isSubmitting={isSubmitting} />}
-      {stage === 'analyzing' && <Analyzing onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setStage('landing'); } }} />}
+      {stage === 'analyzing' && <Analyzing ready={analysisReady} onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setAnalysisError('No pudimos completar tu analisis. Intenta de nuevo.'); setStage('landing'); } }} />}
       {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onWaitlist={() => setStage('waitlist')} onReset={reset} />}
       {stage === 'waitlist' && <Waitlist email={form.email} onReset={reset} />}
 
@@ -309,27 +317,33 @@ function Landing({ form, setForm, onAnalyze, analysisError, onDismissError, isSu
   );
 }
 
-function Analyzing({ onComplete }: { onComplete: () => void }) {
+function Analyzing({ ready, onComplete }: { ready: boolean; onComplete: () => void }) {
   const [progress, setProgress] = useState(0);
-  const [messageIndex, setMessageIndex] = useState(0);
   const completedRef = useRef(false);
 
+  // La barra siempre sube a un ritmo constante hasta 99% (~6.5s, sensacion de
+  // analisis real). Si el motor de IA todavia no respondio al llegar ahi, se
+  // queda esperando en 99% (no se congela ni retrocede) hasta que `ready`
+  // sea true. Nunca avanza a resultados antes de tener un resultado real.
   useEffect(() => {
     const interval = setInterval(() => {
-      setProgress((prev) => {
-        const next = Math.min(prev + 1.5, 100);
-        const msgIdx = Math.min(Math.floor((next / 100) * scanMessages.length), scanMessages.length - 1);
-        setMessageIndex(msgIdx);
-        if (next >= 100 && !completedRef.current) {
-          completedRef.current = true;
-          clearInterval(interval);
-          setTimeout(onComplete, 400);
-        }
-        return next;
-      });
+      setProgress((prev) => (prev >= 99 ? 99 : Math.min(prev + 1.5, 99)));
     }, 100);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (ready && !completedRef.current) {
+      completedRef.current = true;
+      setProgress(100);
+      const t = setTimeout(onComplete, 400);
+      return () => clearTimeout(t);
+    }
+  }, [ready, onComplete]);
+
+  const messageIndex = ready
+    ? scanMessages.length - 1
+    : Math.min(Math.floor((progress / 100) * scanMessages.length), scanMessages.length - 1);
 
   return (
     <main className="analyzing page-wrap">
@@ -337,7 +351,7 @@ function Analyzing({ onComplete }: { onComplete: () => void }) {
       <span className="section-label">ANALIZANDO TU PERFIL</span>
       <h1>Procesando tu posicion<br /><em>en la era de la IA.</em></h1>
       <div className="scan-progress"><div className="scan-progress-bar" style={{ width: `${progress}%` }} /></div>
-      <p className="scan-message">{scanMessages[messageIndex]}</p>
+      <p className="scan-message">{progress >= 99 && !ready ? 'Casi listo, comparando con tu industria...' : scanMessages[messageIndex]}</p>
       <div className="scan-status">
         {scanMessages.map((_, i) => <span key={i} className={i <= messageIndex ? 'active' : ''}><i /> {scanMessages[i]}</span>)}
       </div>

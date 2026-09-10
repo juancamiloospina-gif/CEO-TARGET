@@ -85,13 +85,20 @@ Responde EXCLUSIVAMENTE con un JSON valido, sin texto adicional, con esta forma 
   "recommendations": [string, string, string]
 }`;
 
-// Normaliza para comparar evidencia: minusculas, colapsa espacios Y trata comas/
-// pipes/saltos de linea como separadores equivalentes. Sin esto, una cita real
-// como "Machine Learning, Generative AI" se rechazaba como "alucinacion" solo
-// porque el texto fuente las separa con salto de linea en vez de coma (bug
-// encontrado en QA manual, corregido antes de dar la funcion por lista).
+// Normaliza para comparar evidencia: quita acentos, pasa a minusculas, colapsa
+// espacios y trata comas/pipes/saltos de linea/puntuacion comun como
+// separadores equivalentes. Sin esto, el guardrail rechazaba citas REALES
+// como alucinacion solo por diferencias de formato entre lo que el modelo
+// cito y como el texto fuente las separa (bug encontrado en QA manual: el
+// mismo perfil podia dar 19 en una corrida y 0 en otra porque una cita
+// legitima no pasaba la verificacion por una tilde o un separador distinto).
 function normalize(text: string): string {
-  return text.toLowerCase().replace(/[,;|\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return text
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[,;|.\-\u2013\u2014"'\u2018\u2019\u201c\u201d\u2026\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Guardrail: rechaza cualquier categoria cuya evidencia citada no exista
