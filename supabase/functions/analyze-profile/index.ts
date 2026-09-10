@@ -85,8 +85,13 @@ Responde EXCLUSIVAMENTE con un JSON valido, sin texto adicional, con esta forma 
   "recommendations": [string, string, string]
 }`;
 
+// Normaliza para comparar evidencia: minusculas, colapsa espacios Y trata comas/
+// pipes/saltos de linea como separadores equivalentes. Sin esto, una cita real
+// como "Machine Learning, Generative AI" se rechazaba como "alucinacion" solo
+// porque el texto fuente las separa con salto de linea en vez de coma (bug
+// encontrado en QA manual, corregido antes de dar la funcion por lista).
 function normalize(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+  return text.toLowerCase().replace(/[,;|\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 // Guardrail: rechaza cualquier categoria cuya evidencia citada no exista
@@ -195,7 +200,7 @@ Publicaciones recientes: ${(content.recentPosts || []).join(' | ') || '(vacio)'}
         strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4) : [],
         weaknesses: Array.isArray(parsed.weaknesses) ? parsed.weaknesses.slice(0, 4) : [],
         recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
-        engine: 'claude-sonnet-4.5+verified',
+        engine: 'claude-haiku-4.5+verified',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
