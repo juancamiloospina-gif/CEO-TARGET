@@ -18,7 +18,10 @@
 import { corsHeaders } from '../_shared/cors.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-const ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+// Haiku 4.5 en vez de Sonnet: esta tarea es clasificar contra una rubrica fija con
+// JSON de salida, no razonamiento abierto. Precio: ~3x mas barato que Sonnet
+// ($1/$5 por MTok in/out vs $3/$15) para un resultado equivalente en este caso de uso.
+const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
 
 type ProfileContent = {
   name: string;
