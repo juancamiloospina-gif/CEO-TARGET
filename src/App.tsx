@@ -1,83 +1,436 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, BarChart3, Check, CheckCircle2, ChevronRight,
-  Clock3, Crown, Globe2, Link2, Lock, Menu, MessageSquareText, Radar,
-  ScanLine, Send, Sparkles, Target, UserRound, X, Zap,
+  ArrowRight, BarChart3, Check, CheckCircle2, ChevronRight,
+  Clock3, Copy, Download, FileText, Globe2, Info, Link2, Lock, Menu,
+  Radar, ScanLine, Sparkles, TrendingUp, Upload, UserRound, X, Zap,
 } from 'lucide-react';
+import { analyzeProfile, type Industry, type ProfileContent, type ScoreResult } from '@/lib/scoring';
+import { demoProfiles } from '@/lib/demoProfiles';
+import { supabase } from '@/lib/supabase';
 
-type Stage = 'landing' | 'scanner' | 'dashboard' | 'course' | 'report';
-type Profile = { name: string; email: string; phone: string; country: string; sector: string; team: string; manualHours: string; tools: string; ambition: string; linkedin: string; role: string; company: string };
-type CourseAnswers = Record<string, string>;
-type AppData = { stage: Stage; profile: Profile; score: number; scanned: boolean; course: CourseAnswers; unlocked: boolean; contacted: boolean };
+type Stage = 'landing' | 'analyzing' | 'results' | 'waitlist';
+type FormData = { linkedinUrl: string; pastedContent: string; pdfFile: File | null; email: string; industry: Industry; demoId: string | null };
 
-const initialData: AppData = {
-  stage: 'landing', profile: { name: '', email: '', phone: '', country: 'España', sector: '', team: '', manualHours: '', tools: '', ambition: '', linkedin: '', role: '', company: '' }, score: 0, scanned: false, course: {}, unlocked: false, contacted: false,
-};
+const industries: Industry[] = ['Retail', 'Tecnología', 'Finanzas', 'Consultoría', 'Salud', 'Educación', 'Manufactura', 'Product Management', 'Otro'];
 
-const quickLessons = [
-  { id: 'opportunity', number: '01', title: 'Encuentra el cuello de botella', description: 'No empieces por la herramienta. Empieza por el momento que más energía le roba al equipo.', question: '¿Dónde se repite el mismo trabajo cada semana?', options: ['Administración y reporting', 'Captación y seguimiento comercial', 'Atención y soporte al cliente', 'Operaciones y entregas'] },
-  { id: 'system', number: '02', title: 'Diseña una primera solución', description: 'Una buena automatización combina una señal, una decisión y una acción. Sin complejidad innecesaria.', question: '¿Qué debería hacer tu primer sistema?', options: ['Preparar información antes de una reunión', 'Responder y clasificar solicitudes', 'Detectar oportunidades de venta', 'Convertir datos en decisiones'] },
-  { id: 'next', number: '03', title: 'Elige tu siguiente movimiento', description: 'La ventaja no está en probar veinte herramientas. Está en convertir un flujo concreto en un hábito mejor.', question: '¿Qué quieres conseguir en los próximos 30 días?', options: ['Recuperar horas del equipo', 'Aumentar la conversión', 'Mejorar la experiencia del cliente', 'Tomar decisiones con más claridad'] },
+const scanMessages = [
+  'Analizando titular profesional...',
+  'Revisando seccion About...',
+  'Evaluando skills y certificaciones...',
+  'Midiendo sofisticacion del lenguaje...',
+  'Comparando con benchmark de tu industria...',
 ];
 
-const validStages: Stage[] = ['landing', 'scanner', 'dashboard', 'course', 'report'];
-function loadData(): AppData { try { const saved = { ...initialData, ...JSON.parse(localStorage.getItem('cupperlab-data') || '{}') }; if (!validStages.includes(saved.stage)) { saved.stage = 'landing'; saved.scanned = false; } return saved; } catch { return initialData; } }
-function calculateScore(profile: Profile): number { const signals = [profile.sector, profile.team, profile.manualHours, profile.tools, profile.ambition].filter(Boolean).length; return Math.min(96, 67 + signals * 5 + (profile.role ? 3 : 0)); }
+function parsePastedContent(raw: string): ProfileContent {
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  let headline = '';
+  let about = '';
+  const skills: string[] = [];
+  const certifications: string[] = [];
+  const experience: string[] = [];
+  const education: string[] = [];
+  const recentPosts: string[] = [];
+  const projects: string[] = [];
+  let currentSection = '';
+  let name = '';
+
+  for (const line of lines) {
+    const l = line.toLowerCase();
+    if (l.startsWith('nombre') || l.startsWith('name')) { name = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
+    if (l.startsWith('titular') || l.startsWith('headline') || l.includes('headline')) { headline = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
+    if (l.startsWith('acerca de') || l.startsWith('about') || l.includes('about')) { currentSection = 'about'; continue; }
+    if (l.includes('experiencia') || l.includes('experience')) { currentSection = 'experience'; continue; }
+    if (l.includes('educacion') || l.includes('education')) { currentSection = 'education'; continue; }
+    if (l.includes('habilidades') || l.includes('skills')) { currentSection = 'skills'; continue; }
+    if (l.includes('certificacion') || l.includes('certification')) { currentSection = 'certifications'; continue; }
+    if (l.includes('proyectos') || l.includes('projects')) { currentSection = 'projects'; continue; }
+    if (l.includes('publicacion') || l.includes('posts') || l.includes('activity') || l.includes('actividad')) { currentSection = 'posts'; continue; }
+    if (currentSection === 'about') about += (about ? '\n' : '') + line;
+    else if (currentSection === 'experience') experience.push(line);
+    else if (currentSection === 'education') education.push(line);
+    else if (currentSection === 'skills') skills.push(...line.split(/[,;]/).map((s) => s.trim()).filter(Boolean));
+    else if (currentSection === 'certifications') certifications.push(line);
+    else if (currentSection === 'projects') projects.push(line);
+    else if (currentSection === 'posts') recentPosts.push(line);
+    else if (!headline && !name && line.length < 120) headline = line;
+  }
+
+  return {
+    name: name || '',
+    headline,
+    about,
+    currentRole: headline.split('|')[0]?.trim() || '',
+    experience, education, skills, certifications, projects, recentPosts,
+    aiRelatedTerms: [], quantifiableResults: [],
+  };
+}
 
 function App() {
-  const [data, setData] = useState<AppData>(loadData);
+  const [stage, setStage] = useState<Stage>('landing');
+  const [form, setForm] = useState<FormData>({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null });
+  const [result, setResult] = useState<ScoreResult | null>(null);
+  const [profileContent, setProfileContent] = useState<ProfileContent | null>(null);
+  const [leadSaved, setLeadSaved] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
-  useEffect(() => { localStorage.setItem('cupperlab-data', JSON.stringify(data)); }, [data]);
-  const update = (patch: Partial<AppData>) => setData((current) => ({ ...current, ...patch }));
-  const updateProfile = (patch: Partial<Profile>) => setData((current) => ({ ...current, profile: { ...current.profile, ...patch } }));
-  const score = useMemo(() => data.score || calculateScore(data.profile), [data.score, data.profile]);
-  const completed = Object.keys(data.course).length;
-  const start = () => update({ stage: 'scanner' });
-  const reset = () => { localStorage.removeItem('cupperlab-data'); setData(initialData); };
 
-  return <div className="app-shell">
-    <header className="topbar">
-      <button className="brand" onClick={() => update({ stage: 'landing' })} aria-label="Volver al inicio"><span className="brand-mark"><Radar size={17} /></span><span>CUPPER<span>LAB</span></span></button>
-      <nav className={mobileMenu ? 'nav-links is-open' : 'nav-links'}>
-        <button onClick={() => update({ stage: 'landing' })}>El índice</button>
-        <button onClick={() => update({ stage: data.scanned ? 'dashboard' : 'scanner' })}>Tu ranking</button>
-        <button onClick={() => update({ stage: data.scanned ? 'course' : 'scanner' })}>Tu plan</button>
-      </nav>
-      <div className="top-actions"><span className="secure-note"><span className="status-dot" /> Entorno privado</span><button className="menu-button" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Abrir menú">{mobileMenu ? <X size={20} /> : <Menu size={20} />}</button></div>
-    </header>
-    {data.stage === 'landing' && <Landing onStart={start} />}
-    {data.stage === 'scanner' && <Scanner profile={data.profile} onBack={() => update({ stage: 'landing' })} onProfile={updateProfile} onComplete={(profile) => update({ profile, scanned: true, score: calculateScore(profile), stage: 'dashboard' })} />}
-    {data.stage === 'dashboard' && <Dashboard data={data} score={score} onStart={() => update({ stage: 'course', unlocked: true })} />}
-    {data.stage === 'course' && <QuickCourse data={data} completed={completed} onAnswer={(id, answer) => update({ course: { ...data.course, [id]: answer } })} onFinish={() => update({ stage: 'report' })} />}
-    {data.stage === 'report' && <Report data={data} score={score} onContact={() => update({ contacted: true })} onReset={reset} />}
-    <footer className="footer"><span>© 2024 Cupperlab</span><span>IA nativa para negocios que quieren avanzar.</span><span className="footer-links">Privacidad&nbsp;&nbsp; · &nbsp;&nbsp;Contacto</span></footer>
-  </div>;
+  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
+
+  const handleAnalyze = () => {
+    let content: ProfileContent;
+    let industry = form.industry;
+    if (form.demoId) {
+      const demo = demoProfiles.find((d) => d.id === form.demoId);
+      if (!demo) return;
+      content = demo.content;
+      industry = demo.industry;
+    } else if (form.pastedContent.trim()) {
+      content = parsePastedContent(form.pastedContent);
+    } else if (form.linkedinUrl.trim() && !form.pastedContent.trim()) {
+      setStage('analyzing');
+      return;
+    } else {
+      content = parsePastedContent('');
+    }
+    setProfileContent(content);
+    const score = analyzeProfile(content, industry);
+    setResult(score);
+    setStage('analyzing');
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <button className="brand" onClick={reset} aria-label="Inicio">
+          <span className="brand-mark"><Radar size={17} /></span>
+          <span>CUPPER<span>LAB</span></span>
+        </button>
+        <nav className={mobileMenu ? 'nav-links is-open' : 'nav-links'}>
+          <button onClick={reset}>AI Maturity</button>
+          <button onClick={() => result && setStage('results')}>Mi informe</button>
+        </nav>
+        <div className="top-actions">
+          <span className="secure-note"><span className="status-dot" /> Entorno privado</span>
+          <button className="menu-button" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Menu">{mobileMenu ? <X size={20} /> : <Menu size={20} />}</button>
+        </div>
+      </header>
+
+      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} />}
+      {stage === 'analyzing' && <Analyzing onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setStage('landing'); } }} />}
+      {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onWaitlist={() => setStage('waitlist')} onReset={reset} />}
+      {stage === 'waitlist' && <Waitlist email={form.email} onReset={reset} />}
+
+      <footer className="footer">
+        <span>© 2024 Cupperlab AI Funnel</span>
+        <span>Este diagnostico evalua la forma en que el perfil comunica publicamente sus capacidades de IA. No certifica el nivel tecnico real de la persona.</span>
+      </footer>
+    </div>
+  );
 }
 
-function Landing({ onStart }: { onStart: () => void }) {
-  return <main className="landing page-wrap"><div className="eyebrow"><span className="eyebrow-line" /> DIAGNÓSTICO DE MADUREZ DIGITAL <span className="eyebrow-line" /></div><div className="hero-grid"><section className="hero-copy"><div className="hero-kicker"><Sparkles size={15} /> EL ÍNDICE CUPPERLAB <span>01 / 03 MIN</span></div><h1>Descubre dónde puede ganar <em>tu negocio</em> con IA.</h1><p className="hero-subtitle">Escaneamos tu perfil profesional y te entregamos un plan de acción diseñado para tu empresa. Sin formularios eternos. Sin teoría.</p><button className="button button-gold" onClick={onStart}>Escanear mi perfil <ScanLine size={17} /></button><div className="trust-row"><span><CheckCircle2 size={15} /> Gratis y sin compromiso</span><span><Clock3 size={15} /> 3 minutos</span><span><Lock size={15} /> Tus datos son privados</span></div></section><section className="hero-visual"><div className="orb orb-back" /><div className="orb orb-front" /><div className="visual-card card-top"><span>LECTURA DE PERFIL</span><strong>87.4</strong><small>Perfil con alto potencial</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /><i /></div></div><div className="visual-card card-bottom"><div className="mini-icon"><Zap size={16} /></div><div><span>PRÓXIMO PASO</span><strong>3 oportunidades</strong></div><ArrowRight size={15} /></div><div className="orbit-label label-a">NUEVA<br /><b>VENTAJA</b></div><div className="orbit-label label-b">LECTURA<br /><b>EN 3 MINUTOS</b></div></section></div><div className="landing-bottom"><div><span className="number-label">01</span><p>Menos preguntas.<br /><b>Más claridad para decidir.</b></p></div><div className="scroll-cue"><span>PROCESO EN 3 PASOS</span><span className="scroll-line" /></div><div className="landing-stat"><strong>3</strong><span>recomendaciones<br />para empezar</span></div></div></main>;
+async function saveLead(form: FormData, result: ScoreResult, content: ProfileContent | null, setLeadSaved: (v: boolean) => void) {
+  try {
+    await supabase.from('leads').insert({
+      email: form.email,
+      name: content?.name || '',
+      industry: form.industry,
+      linkedin_url: form.linkedinUrl,
+      score: result.total,
+      percentile: result.percentile,
+      level: result.level,
+      strengths: result.strengths,
+      weaknesses: result.weaknesses,
+      recommendations: result.recommendations,
+      status: 'Lead capturado - pendiente de nurturing',
+      source: 'AI Maturity Profile',
+    });
+    setLeadSaved(true);
+  } catch { setLeadSaved(false); }
 }
 
-function Scanner({ profile, onBack, onProfile, onComplete }: { profile: Profile; onBack: () => void; onProfile: (patch: Partial<Profile>) => void; onComplete: (profile: Profile) => void }) {
-  const [step, setStep] = useState(0); const [scanning, setScanning] = useState(false);
-  const canScan = Boolean(profile.linkedin || profile.company);
-  const runScan = () => { setScanning(true); window.setTimeout(() => { const detected: Profile = { ...profile, name: profile.name || (profile.linkedin ? 'Alex García' : 'Tu perfil'), company: profile.company || 'Empresa detectada', sector: profile.sector || 'Servicios profesionales', role: profile.role || 'Founder & CEO', team: profile.team || '6 – 15 personas', manualHours: profile.manualHours || '10 – 20 horas', tools: profile.tools || 'Muchas herramientas, pero desconectadas', ambition: profile.ambition || 'Ahorrar tiempo operativo' }; onComplete(detected); }, 1600); };
-  return <main className="scanner page-wrap"><div className="scanner-top"><button className="back-button" onClick={onBack}><ArrowLeft size={16} /> Volver</button><div className="scanner-steps"><span className={step >= 0 ? 'step-active' : ''}>01 Perfil</span><i /><span className={step >= 1 ? 'step-active' : ''}>02 Lectura</span><i /><span className={step >= 2 ? 'step-active' : ''}>03 Resultado</span></div><span className="quiz-tag">CUPPERLAB / SCANNER</span></div>{scanning ? <div className="scanning-view"><div className="scan-ring"><ScanLine size={42} /><div className="scan-sweep" /></div><span className="section-label">ANALIZANDO TU PERFIL</span><h1>Encontrando señales<br /><em>de oportunidad.</em></h1><p>Estamos leyendo tu posición, tu sector y el contexto de tu negocio.</p><div className="scan-status"><span><i /> Experiencia profesional</span><span><i /> Contexto del sector</span><span><i /> Potencial de automatización</span></div></div> : <section className="scanner-panel"><div className="scanner-copy"><span className="section-label">EL ESCÁNER CUPPERLAB</span><h1>Cuéntanos dónde<br /><em>encontrarte.</em></h1><p>Usaremos tu perfil profesional como punto de partida. No publicamos nada ni guardamos tus credenciales.</p><div className="privacy-callout"><Lock size={16} /><span><b>Privado y seguro</b><br />Solo utilizamos la información que compartes aquí.</span></div></div><div className="scanner-form"><div className="scanner-form-head"><span className="form-step">0{step + 1}</span><div><b>{step === 0 ? 'Conecta tu perfil profesional' : 'Afina tu lectura'}</b><small>{step === 0 ? 'Elige una opción para empezar.' : 'Dos datos opcionales para hacerla más precisa.'}</small></div></div>{step === 0 ? <><label><span><Link2 size={14} /> URL de LinkedIn</span><input value={profile.linkedin} onChange={(e) => onProfile({ linkedin: e.target.value })} placeholder="linkedin.com/in/tu-nombre" /></label><div className="or-divider"><span>o</span></div><label><span><Globe2 size={14} /> Nombre de tu empresa</span><input value={profile.company} onChange={(e) => onProfile({ company: e.target.value })} placeholder="El nombre de tu empresa" /></label><button className="button button-gold wide-button" disabled={!canScan} onClick={() => setStep(1)}>Continuar <ArrowRight size={16} /></button></> : <><label><span><UserRound size={14} /> Tu nombre</span><input value={profile.name} onChange={(e) => onProfile({ name: e.target.value })} placeholder="Cómo te llamamos" /></label><label><span><Target size={14} /> Tu cargo</span><input value={profile.role} onChange={(e) => onProfile({ role: e.target.value })} placeholder="Founder, CEO, Director…" /></label><button className="button button-gold wide-button" onClick={runScan}>Analizar mi perfil <ScanLine size={16} /></button><button className="text-button center-button" onClick={runScan}>Saltar y analizar</button></>}</div></section>}</main>;
+function Landing({ form, setForm, onAnalyze }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void }) {
+  const [visitorCount] = useState(() => 1247 + Math.floor(Math.random() * 300));
+  const [showDemo, setShowDemo] = useState(false);
+  const canAnalyze = form.demoId ? true : (form.linkedinUrl.trim().length > 0 || form.pastedContent.trim().length > 0) && form.email.trim().length > 0;
+  const needsEmail = !form.demoId && !form.email.trim();
+
+  return (
+    <main className="landing page-wrap">
+      <div className="eyebrow"><span className="eyebrow-line" /> AI MATURITY PROFILE <span className="eyebrow-line" /></div>
+      <div className="hero-grid">
+        <section className="hero-copy">
+          <div className="hero-kicker"><Sparkles size={15} /> CUPPERLAB AI FUNNEL <span>2 MIN</span></div>
+          <h1>¿En que posicion estas frente a los empresarios de tu <em>industria</em> en la era de la IA?</h1>
+          <p className="hero-subtitle">Analizamos como comunicas publicamente tus capacidades de inteligencia artificial y te mostramos tu posicion estimada frente al promedio de tu sector. En 2 minutos.</p>
+          <div className="social-proof"><UserRound size={14} /> Unete a los <strong>{visitorCount.toLocaleString('es')}</strong> profesionales que ya han medido su AI Maturity Score este mes.</div>
+        </section>
+        <section className="hero-visual">
+          <div className="orb orb-back" /><div className="orb orb-front" />
+          <div className="visual-card card-top"><span>AI MATURITY SCORE</span><strong>72<small>/100</small></strong><small>Avanzado · Top 15%</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /><i /></div></div>
+          <div className="visual-card card-bottom"><div className="mini-icon"><Zap size={16} /></div><div><span>POSICION ESTIMADA</span><strong>Top 15% del sector</strong></div><ArrowRight size={15} /></div>
+        </section>
+      </div>
+
+      <div className="form-section">
+        <div className="form-card">
+          <div className="form-header"><span className="section-label">ANALISIS DE PERFIL</span><h2>Tu AI Maturity Score en 2 minutos</h2></div>
+
+          <div className="demo-bar">
+            <button className={showDemo ? 'demo-toggle active' : 'demo-toggle'} onClick={() => setShowDemo(!showDemo)}>
+              <Sparkles size={14} /> Probar con perfiles de demostracion
+            </button>
+            {showDemo && (
+              <div className="demo-options">
+                {demoProfiles.map((demo) => (
+                  <button key={demo.id} className={form.demoId === demo.id ? 'demo-option selected' : 'demo-option'} onClick={() => setForm({ ...form, demoId: form.demoId === demo.id ? null : demo.id, email: form.demoId === demo.id ? '' : 'demo@cupperlab.com' })}>
+                    <Check size={14} /> <b>{demo.label}</b> <span>{demo.description}</span>
+                  </button>
+                ))}
+                {form.demoId && <div className="demo-notice"><Info size={13} /> Este es un perfil de demostracion. Los datos mostrados son ficticios y sirven para ilustrar el funcionamiento de la herramienta.</div>}
+              </div>
+            )}
+          </div>
+
+          {!form.demoId && (
+            <>
+              <div className="input-group">
+                <label><span><Link2 size={14} /> URL de LinkedIn</span><input type="url" value={form.linkedinUrl} onChange={(e) => setForm({ ...form, linkedinUrl: e.target.value })} placeholder="linkedin.com/in/tu-nombre" /></label>
+                <p className="input-hint"><Info size={12} /> La URL identifica tu perfil. Para un analisis preciso, pega el contenido o sube el PDF.</p>
+              </div>
+              <div className="input-group">
+                <label><span><FileText size={14} /> Contenido del perfil (opcional, recomendado)</span><textarea value={form.pastedContent} onChange={(e) => setForm({ ...form, pastedContent: e.target.value })} placeholder="Pega aqui el texto de tu perfil de LinkedIn (Headline, About, Skills, Certificaciones, etc.) para un analisis mas preciso." rows={5} /></label>
+              </div>
+              <div className="input-group">
+                <label className="pdf-upload"><span><Upload size={14} /> Subir PDF de LinkedIn (opcional)</span>
+                  <div className="pdf-dropzone">
+                    <input type="file" accept=".pdf" onChange={(e) => setForm({ ...form, pdfFile: e.target.files?.[0] || null })} />
+                    {form.pdfFile ? <span className="pdf-selected"><CheckCircle2 size={16} /> {form.pdfFile.name}</span> : <span className="pdf-placeholder">Arrastra o selecciona un archivo PDF</span>}
+                  </div>
+                </label>
+              </div>
+              <div className="input-row">
+                <label><span><Globe2 size={14} /> Industria</span>
+                  <select value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value as Industry })}>
+                    {industries.map((ind) => <option key={ind} value={ind}>{ind}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="input-group">
+                <label><span><Lock size={14} /> Tu email (obligatorio para recibir el informe)</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="tu@email.com" /></label>
+              </div>
+            </>
+          )}
+
+          <button className="button button-gold wide-button" disabled={!canAnalyze || needsEmail} onClick={onAnalyze}>
+            Analizar mi perfil y ver mi posicion <ArrowRight size={16} />
+          </button>
+          {needsEmail && !form.demoId && <p className="input-hint center"><Lock size={12} /> Necesitamos tu email para enviarte el informe completo.</p>}
+          <p className="trust-microcopy"><Lock size={12} /> No almacenamos tu perfil. Solo analizamos el contenido que nos proporcionas. Tu informe es privado.</p>
+        </div>
+      </div>
+    </main>
+  );
 }
 
-function Dashboard({ data, score, onStart }: { data: AppData; score: number; onStart: () => void }) {
-  const percentile = Math.min(99, score + 2); return <main className="dashboard page-wrap"><div className="dashboard-heading"><div><span className="section-label">LECTURA COMPLETADA · {data.profile.company}</span><h1>Hola, {data.profile.name || 'empresario'}.</h1><p>Hemos encontrado señales claras. Ahora las convertimos en un plan para tu negocio.</p></div><div className="avatar"><UserRound size={20} /></div></div><section className="score-grid"><div className="score-card"><div className="score-header"><span>ÍNDICE DE OPORTUNIDAD</span><span className="live"><i /> PERFIL ANALIZADO</span></div><div className="score-main"><div className="score-number">{score}<small>/100</small></div><div className="score-copy"><strong>Estás en el TOP {100 - percentile}%</strong><span>por encima del {percentile}º percentil de negocios similares</span><div className="score-track"><i style={{ width: `${score}%` }} /></div></div></div><div className="score-footer"><span><BarChart3 size={17} /> Potencial alto de mejora</span><span><Globe2 size={16} /> Comparativa de sector</span></div></div><div className="radar-card"><span className="section-label">SEÑAL PRINCIPAL</span><h3>{data.profile.ambition || 'Más tiempo para lo importante'}</h3><p>Tu oportunidad más inmediata está en convertir el trabajo repetitivo en un sistema que trabaje contigo.</p><div className="radar-lines"><span /><span /><span /></div><Radar className="radar-symbol" size={72} strokeWidth={1} /></div></section><section className="unlock-panel"><div className="unlock-icon"><Crown size={23} /></div><div className="unlock-copy"><span className="section-label">PLAN EXPRESS · 3 RECOMENDACIONES</span><h2>Tu diagnóstico ya está listo.</h2><p>En menos de 5 minutos vas a identificar una oportunidad, diseñar una solución y elegir tu siguiente paso.</p><div className="feature-list"><span><Check size={14} /> 3 micro-lecciones</span><span><Check size={14} /> Recomendaciones a medida</span><span><Check size={14} /> Informe de oportunidades</span></div></div><div className="unlock-action"><div className="price"><small>TIEMPO RESTANTE</small><strong>03<span> min</span></strong></div><button className="button button-gold" onClick={onStart}>Ver mi plan <ArrowRight size={16} /></button><button className="text-button">Sin compromiso</button></div></section></main>;
+function Analyzing({ onComplete }: { onComplete: () => void }) {
+  const [progress, setProgress] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setProgress((prev) => {
+        const next = Math.min(prev + 1.5, 100);
+        const msgIdx = Math.min(Math.floor((next / 100) * scanMessages.length), scanMessages.length - 1);
+        setMessageIndex(msgIdx);
+        if (next >= 100 && !completedRef.current) {
+          completedRef.current = true;
+          clearInterval(interval);
+          setTimeout(onComplete, 400);
+        }
+        return next;
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <main className="analyzing page-wrap">
+      <div className="scan-ring"><ScanLine size={42} /><div className="scan-sweep" /></div>
+      <span className="section-label">ANALIZANDO TU PERFIL</span>
+      <h1>Procesando tu posicion<br /><em>en la era de la IA.</em></h1>
+      <div className="scan-progress"><div className="scan-progress-bar" style={{ width: `${progress}%` }} /></div>
+      <p className="scan-message">{scanMessages[messageIndex]}</p>
+      <div className="scan-status">
+        {scanMessages.map((_, i) => <span key={i} className={i <= messageIndex ? 'active' : ''}><i /> {scanMessages[i]}</span>)}
+      </div>
+    </main>
+  );
 }
 
-function QuickCourse({ data, completed, onAnswer, onFinish }: { data: AppData; completed: number; onAnswer: (id: string, answer: string) => void; onFinish: () => void }) {
-  const [active, setActive] = useState(0); const lesson = quickLessons[active]; const selected = data.course[lesson.id]; const finish = active === quickLessons.length - 1 && Boolean(selected);
-  const next = () => active < quickLessons.length - 1 ? setActive(active + 1) : onFinish();
-  return <main className="course page-wrap"><div className="course-header"><div><span className="section-label">PLAN EXPRESS CUPPERLAB</span><h1>Tres decisiones.<br /><em>Un mejor punto de partida.</em></h1></div><div className="course-time"><Clock3 size={16} /><span>3 MINUTOS<br /><b>{completed} / 03 completadas</b></span></div></div><div className="course-layout"><aside className="course-sidebar"><span className="sidebar-label">TU PLAN</span>{quickLessons.map((item, index) => <button key={item.id} className={index === active ? 'mission-nav active' : 'mission-nav'} onClick={() => index <= completed && setActive(index)} disabled={index > completed}><span>{item.number}</span><b>{item.title}</b>{data.course[item.id] && <Check size={14} />}</button>)}<div className="sidebar-note"><Sparkles size={15} /><p>Tu respuesta convierte una recomendación genérica en un siguiente paso para tu empresa.</p></div></aside><section className="lesson-content"><div className="mission-topline"><span>RECOMENDACIÓN {lesson.number}</span><span>{active + 1} / 03</span></div><h2>{lesson.title}</h2><p className="mission-description">{lesson.description}</p><div className="mission-prompt"><Target size={18} /><p>{lesson.question}</p></div><div className="quick-options">{lesson.options.map((option) => <button key={option} className={selected === option ? 'quick-option selected' : 'quick-option'} onClick={() => onAnswer(lesson.id, option)}><span>{selected === option ? <Check size={15} /> : <span />}</span>{option}<ChevronRight size={15} /></button>)}</div><div className="mission-actions"><span><Lock size={13} /> Guardado automáticamente</span><button className="button button-gold" disabled={!selected} onClick={next}>{finish ? 'Ver mi informe' : 'Siguiente'} <ArrowRight size={16} /></button></div></section></div></main>;
+function Results({ result, content, form, leadSaved, onWaitlist, onReset }: { result: ScoreResult; content: ProfileContent | null; form: FormData; leadSaved: boolean; onWaitlist: () => void; onReset: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [animatedScore, setAnimatedScore] = useState(0);
+  const industryAvg = 45;
+  const top10Avg = 82;
+
+  useEffect(() => {
+    const duration = 1200;
+    const steps = 60;
+    const increment = result.total / steps;
+    let current = 0;
+    const interval = setInterval(() => {
+      current += increment;
+      if (current >= result.total) { current = result.total; clearInterval(interval); }
+      setAnimatedScore(Math.round(current));
+    }, duration / steps);
+    return () => clearInterval(interval);
+  }, [result.total]);
+
+  const impactMsg = result.total < 40 ? 'Estas por debajo del promedio de tu industria. Hay margen de mejora claro.' : result.total < 60 ? 'Estas en la media. Para destacar necesitas diferenciarte.' : 'Estas por encima del promedio. Ahora toca consolidar tu liderazgo.';
+
+  const copyJSON = () => {
+    const json = JSON.stringify({ user: { name: content?.name, email: form.email, industry: form.industry, linkedinUrl: form.linkedinUrl }, scores: result.scores, total: result.total, classification: { level: result.level, percentile: result.percentile, benchmark: result.benchmark }, analysis: { strengths: result.strengths, weaknesses: result.weaknesses, recommendations: result.recommendations }, confidence: result.confidence, metadata: { source: 'AI Maturity Profile', version: '1.0' } }, null, 2);
+    navigator.clipboard.writeText(json);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadPDF = () => {
+    const text = `AI MATURITY SCORE: ${result.total}/100\nNivel: ${result.level}\nPercentil: ${result.percentile}\n\nFORTALEZAS:\n${result.strengths.map((s) => '- ' + s).join('\n')}\n\nDEBILIDADES:\n${result.weaknesses.map((w) => '- ' + w).join('\n')}\n\nRECOMENDACIONES:\n${result.recommendations.map((r) => '- ' + r).join('\n')}`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'ai-maturity-report.txt'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <main className="results page-wrap">
+      {form.demoId && <div className="demo-banner"><Info size={14} /> Este es un perfil de demostracion. Los datos mostrados son ficticios y sirven para ilustrar el funcionamiento de la herramienta.</div>}
+
+      <div className="results-hero">
+        <div>
+          <span className="section-label">INFORME AI MATURITY · {form.industry.toUpperCase()}</span>
+          <h1>AI Maturity Score<br /><em>{animatedScore}/100</em></h1>
+          <div className="level-badge">{result.level}</div>
+          <p className="impact-msg">{impactMsg}</p>
+        </div>
+        <div className="percentile-stamp">
+          <span>{result.percentile}</span>
+          <small>vs. benchmark de {form.industry}</small>
+        </div>
+      </div>
+
+      <section className="comparison-bar-section">
+        <div className="comparison-bar">
+          <div className="comp-labels"><span>0</span><span>100</span></div>
+          <div className="comp-track">
+            <div className="comp-marker industry-avg" style={{ left: `${industryAvg}%` }}><span>Promedio<br />industria</span></div>
+            <div className="comp-marker top-10" style={{ left: `${top10Avg}%` }}><span>Top 10%</span></div>
+            <div className="comp-marker you" style={{ left: `${result.total}%` }}><span>Tu</span></div>
+          </div>
+        </div>
+        <p className="comp-disclaimer"><Info size={12} /> Estos porcentajes representan prevalencia de skills declaradas, no un promedio cientifico del AI Maturity Score.</p>
+      </section>
+
+      <section className="category-grid">
+        <CategoryCard title="Presencia de IA en Headline y About" score={result.scores.headline + result.scores.about} max={30} tooltip="Evalua si tu titular y seccion About comunican capacidades de IA de forma clara y diferenciada." />
+        <CategoryCard title="Skills y Certificaciones" score={result.scores.skills + result.scores.certifications} max={30} tooltip="Mide la cantidad, relevancia y profundidad de tus skills y certificaciones en IA declaradas." />
+        <CategoryCard title="Sofisticacion del Lenguaje" score={result.scores.language} max={20} tooltip="Analiza si el perfil menciona automatizacion, integracion de IA en workflows, sistemas predictivos e impacto medible." />
+        <CategoryCard title="Actividad y Engagement" score={result.scores.activity} max={20} tooltip="Evalua publicaciones verificables sobre IA en los ultimos 12 meses: frecuencia, profundidad y engagement." />
+      </section>
+
+      <section className="swot-grid">
+        <div className="swot-card strengths">
+          <span className="section-label">FORTALEZAS</span>
+          <h3>Lo que ya comunicas bien</h3>
+          {result.strengths.map((s, i) => <div key={i} className="swot-item"><CheckCircle2 size={16} /> <p>{s}</p></div>)}
+        </div>
+        <div className="swot-card weaknesses">
+          <span className="section-label">DEBILIDADES</span>
+          <h3>Oportunidades de mejora</h3>
+          {result.weaknesses.map((w, i) => <div key={i} className="swot-item"><X size={16} /> <p>{w}</p></div>)}
+        </div>
+      </section>
+
+      <section className="recommendations-section">
+        <span className="section-label">3 RECOMENDACIONES PRIORITARIAS</span>
+        <h2>Tu plan para subir en el ranking</h2>
+        <div className="rec-list">
+          {result.recommendations.map((rec, i) => (
+            <div key={i} className="rec-item"><span className="rec-number">0{i + 1}</span><p>{rec}</p><ChevronRight size={16} /></div>
+          ))}
+        </div>
+      </section>
+
+      <section className="cta-conversion">
+        <div>
+          <span className="section-label">¿QUIERES SUBIR TU POSICION?</span>
+          <h2>¿Quieres subir tu posicion en el ranking de tu industria?</h2>
+          <p>Hemos diseñado un sistema practico para que en pocas semanas puedas:</p>
+          <div className="cta-features"><span><Check size={14} /> Optimizar tu posicionamiento publico en IA</span><span><Check size={14} /> Construir autoridad real en tu sector</span><span><Check size={14} /> Destacar frente a tus competidores</span></div>
+        </div>
+        <div className="cta-action">
+          <button className="button button-gold" onClick={onWaitlist}>Quiero mejorar mi posicionamiento en IA <ArrowRight size={16} /></button>
+          <p className="cta-microcopy">Plazas limitadas. Te avisaremos cuando abramos la proxima cohorte.</p>
+        </div>
+      </section>
+
+      <section className="confidence-section">
+        <div className="confidence-indicator">
+          <span className="section-label">CONFIANZA DEL ANALISIS</span>
+          <div className={`confidence-badge ${result.confidence.level.toLowerCase()}`}>{result.confidence.level}</div>
+          <div className="confidence-details">
+            <div><b>Secciones analizadas:</b> {result.confidence.sectionsAnalyzed.join(', ') || 'Ninguna'}</div>
+            <div><b>Secciones faltantes:</b> {result.confidence.missingSections.join(', ') || 'Ninguna'}</div>
+          </div>
+        </div>
+        <p className="disclaimer">Este diagnostico evalua la forma en que el perfil comunica publicamente sus capacidades de IA. No certifica el nivel tecnico real de la persona.</p>
+      </section>
+
+      <div className="results-actions">
+        <button className="action-btn" onClick={copyJSON}><Copy size={15} /> {copied ? 'Copiado' : 'Copiar JSON'}</button>
+        <button className="action-btn" onClick={downloadPDF}><Download size={15} /> Descargar informe</button>
+        <button className="action-btn" onClick={onReset}><ScanLine size={15} /> Analizar otro perfil</button>
+      </div>
+      {leadSaved && <div className="lead-saved"><CheckCircle2 size={14} /> Tu informe ha sido guardado. Te enviaremos el resultado a tu email.</div>}
+    </main>
+  );
 }
 
-function Report({ data, score, onContact, onReset }: { data: AppData; score: number; onContact: () => void; onReset: () => void }) {
-  const [formOpen, setFormOpen] = useState(false); const [sent, setSent] = useState(data.contacted); const [contact, setContact] = useState({ name: data.profile.name, email: data.profile.email, phone: data.profile.phone }); const sector = data.profile.sector || 'tu sector'; const options = [`Automatizar la gestión repetitiva de ${sector.toLowerCase()}`, data.course.opportunity ? `Crear un sistema para ${data.course.opportunity.toLowerCase()}` : 'Convertir tu conocimiento en un sistema que trabaja contigo', data.course.next ? `Usar IA para ${data.course.next.toLowerCase()}` : 'Crear un seguimiento inteligente para cada oportunidad']; const send = (event: React.FormEvent) => { event.preventDefault(); setSent(true); onContact(); };
-  return <main className="report page-wrap"><div className="report-hero"><div><span className="section-label">INFORME CUPPERLAB · COMPLETADO EN {data.profile.company.toUpperCase()}</span><h1>Ya puedes ver<br /><em>por dónde empezar.</em></h1><p>Hemos cruzado tu perfil con tus decisiones para preparar tres oportunidades concretas, sin teoría sobrante.</p></div><div className="report-stamp"><CheckCircle2 size={24} /><span>ÍNDICE FINAL</span><strong>{score}</strong><small>TOP {100 - Math.min(99, score + 2)}%</small></div></div><section className="opportunity-card"><div className="opportunity-heading"><span className="section-label">3 OPORTUNIDADES IDENTIFICADAS</span><h2>El potencial está más cerca de lo que parece.</h2></div><div className="opportunities">{options.map((item, index) => <div className="opportunity" key={item}><span>0{index + 1}</span><div><strong>{item}</strong><p>Una hipótesis priorizada a partir de tu perfil y del plan que acabas de completar.</p></div><ChevronRight size={18} /></div>)}</div><div className="value-estimate"><div><span>VALOR ESTIMADO DE RECUPERACIÓN</span><strong>+{data.profile.manualHours?.includes('Más de 20') ? '1.040' : '520'} <small>€ / mes</small></strong></div><p>Estimación orientativa basada en el tiempo operativo que podrías liberar. El siguiente paso es validarlo juntos.</p></div></section><section className="conversion"><div><span className="section-label">¿QUIERES IMPLEMENTARLAS?</span><h2>Hablemos de tu próximo sistema.</h2><p>Cupperlab es el partner estratégico para convertir estas oportunidades en una ventaja operativa real.</p></div>{sent ? <div className="sent-box"><CheckCircle2 size={22} /><div><strong>Tu briefing está en buenas manos.</strong><span>Te contactaremos para agendar una sesión de 30 minutos.</span></div></div> : formOpen ? <form className="contact-form" onSubmit={send}><input required value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} placeholder="Tu nombre" /><input required type="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} placeholder="Tu email" /><input value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} placeholder="Teléfono (opcional)" /><button className="button button-gold" type="submit">Enviar briefing <Send size={16} /></button></form> : <button className="button button-gold" onClick={() => setFormOpen(true)}>Agendar sesión gratis <ArrowRight size={16} /></button>}</section><div className="report-bottom"><span><MessageSquareText size={15} /> Sesión estratégica de 30 min · Sin compromiso</span><button className="text-button" onClick={onReset}>Repetir diagnóstico</button></div></main>;
+function CategoryCard({ title, score, max, tooltip }: { title: string; score: number; max: number; tooltip: string }) {
+  const [showTip, setShowTip] = useState(false);
+  const pct = (score / max) * 100;
+  return (
+    <div className="category-card">
+      <div className="cat-header">
+        <span>{title}</span>
+        <button className="info-btn" onMouseEnter={() => setShowTip(true)} onMouseLeave={() => setShowTip(false)}><Info size={14} /></button>
+        {showTip && <div className="tooltip">{tooltip}</div>}
+      </div>
+      <div className="cat-score">{score}<small>/{max}</small></div>
+      <div className="cat-bar"><i style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
+function Waitlist({ email, onReset }: { email: string; onReset: () => void }) {
+  return (
+    <main className="waitlist page-wrap">
+      <div className="waitlist-card">
+        <div className="waitlist-icon"><CheckCircle2 size={32} /></div>
+        <span className="section-label">LISTA DE ESPERA</span>
+        <h1>Gracias. Tu plaza esta reservada.</h1>
+        <p>Te avisaremos cuando abramos la proxima cohorte. Mientras tanto, te enviaremos recursos exclusivos a <strong>{email}</strong>.</p>
+        <div className="waitlist-features">
+          <div><TrendingUp size={18} /> <span>Recibiras recursos exclusivos sobre IA aplicada</span></div>
+          <div><BarChart3 size={18} /> <span>Acceso prioritario a la proxima cohorte</span></div>
+          <div><Clock3 size={18} /> <span>Sin compromiso · Puedes darte de baja cuando quieras</span></div>
+        </div>
+        <button className="button button-gold" onClick={onReset}>Volver al inicio <ArrowRight size={16} /></button>
+      </div>
+    </main>
+  );
 }
 
 export default App;
