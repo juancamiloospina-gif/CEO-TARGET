@@ -7,6 +7,7 @@ import {
 import { analyzeProfile, type Industry, type ProfileContent, type ScoreResult } from '@/lib/scoring';
 import { demoProfiles } from '@/lib/demoProfiles';
 import { supabase } from '@/lib/supabase';
+import { extractPdfText } from '@/lib/pdf';
 
 type Stage = 'landing' | 'analyzing' | 'results' | 'waitlist';
 type FormData = { linkedinUrl: string; pastedContent: string; pdfFile: File | null; email: string; industry: Industry; demoId: string | null };
@@ -38,11 +39,11 @@ function parsePastedContent(raw: string): ProfileContent {
     const l = line.toLowerCase();
     if (l.startsWith('nombre') || l.startsWith('name')) { name = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
     if (l.startsWith('titular') || l.startsWith('headline') || l.includes('headline')) { headline = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
-    if (l.startsWith('acerca de') || l.startsWith('about') || l.includes('about')) { currentSection = 'about'; continue; }
+    if (l.startsWith('acerca de') || l.startsWith('about') || l.includes('about') || l.startsWith('resumen') || l.startsWith('summary')) { currentSection = 'about'; continue; }
     if (l.includes('experiencia') || l.includes('experience')) { currentSection = 'experience'; continue; }
     if (l.includes('educacion') || l.includes('education')) { currentSection = 'education'; continue; }
-    if (l.includes('habilidades') || l.includes('skills')) { currentSection = 'skills'; continue; }
-    if (l.includes('certificacion') || l.includes('certification')) { currentSection = 'certifications'; continue; }
+    if (l.includes('habilidades') || l.includes('skills') || l.includes('aptitudes')) { currentSection = 'skills'; continue; }
+    if (l.includes('certificacion') || l.includes('certification') || l.includes('licencias')) { currentSection = 'certifications'; continue; }
     if (l.includes('proyectos') || l.includes('projects')) { currentSection = 'projects'; continue; }
     if (l.includes('publicacion') || l.includes('posts') || l.includes('activity') || l.includes('actividad')) { currentSection = 'posts'; continue; }
     if (currentSection === 'about') about += (about ? '\n' : '') + line;
@@ -72,25 +73,53 @@ function App() {
   const [profileContent, setProfileContent] = useState<ProfileContent | null>(null);
   const [leadSaved, setLeadSaved] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
-  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
+  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setAnalysisError(null); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
+    setAnalysisError(null);
     let content: ProfileContent;
     let industry = form.industry;
+
     if (form.demoId) {
       const demo = demoProfiles.find((d) => d.id === form.demoId);
       if (!demo) return;
       content = demo.content;
       industry = demo.industry;
-    } else if (form.pastedContent.trim()) {
-      content = parsePastedContent(form.pastedContent);
-    } else if (form.linkedinUrl.trim() && !form.pastedContent.trim()) {
-      setStage('analyzing');
-      return;
     } else {
-      content = parsePastedContent('');
+      let combinedText = form.pastedContent.trim();
+
+      if (form.pdfFile) {
+        try {
+          const extracted = await extractPdfText(form.pdfFile);
+          if (extracted.isEmpty) {
+            setAnalysisError('El PDF que subiste esta vacio o no pudimos leer su texto (puede ser una imagen escaneada). Pega el contenido de tu perfil manualmente o prueba con otro archivo.');
+            return;
+          }
+          combinedText = combinedText ? `${combinedText}\n${extracted.text}` : extracted.text;
+        } catch {
+          setAnalysisError('No pudimos procesar el PDF. Verifica que sea un PDF de texto exportado desde LinkedIn (no una imagen escaneada) o pega el contenido manualmente.');
+          return;
+        }
+      }
+
+      if (!combinedText.trim()) {
+        setAnalysisError('No podemos leer tu perfil de LinkedIn solo con la URL: LinkedIn bloquea el acceso automatico a perfiles. Pega el contenido de tu perfil o sube el PDF exportado desde LinkedIn para continuar.');
+        return;
+      }
+
+      content = parsePastedContent(combinedText);
+      const hasSignal = Boolean(
+        content.headline || content.about || content.skills.length ||
+        content.certifications.length || content.experience.length || content.recentPosts.length
+      );
+      if (!hasSignal) {
+        setAnalysisError('No pudimos identificar informacion util en el texto proporcionado. Incluye al menos tu titular (headline) y tu seccion About.');
+        return;
+      }
     }
+
     setProfileContent(content);
     const score = analyzeProfile(content, industry);
     setResult(score);
@@ -114,7 +143,7 @@ function App() {
         </div>
       </header>
 
-      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} />}
+      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} />}
       {stage === 'analyzing' && <Analyzing onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setStage('landing'); } }} />}
       {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onWaitlist={() => setStage('waitlist')} onReset={reset} />}
       {stage === 'waitlist' && <Waitlist email={form.email} onReset={reset} />}
@@ -122,12 +151,14 @@ function App() {
       <footer className="footer">
         <span>© 2024 Cupperlab AI Funnel</span>
         <span>Este diagnostico evalua la forma en que el perfil comunica publicamente sus capacidades de IA. No certifica el nivel tecnico real de la persona.</span>
+        <span><a className="privacy-link" href="mailto:juancamilo@cupperlab.com?subject=Solicitud%20de%20eliminacion%20de%20datos%20(GDPR)&body=Hola%2C%20quiero%20solicitar%20la%20eliminacion%20de%20mis%20datos%20personales%20almacenados%20en%20AI%20Maturity%20Profile.%20Mi%20email%20registrado%20es%3A%20">Solicitar eliminacion de mis datos (GDPR)</a></span>
       </footer>
     </div>
   );
 }
 
 async function saveLead(form: FormData, result: ScoreResult, content: ProfileContent | null, setLeadSaved: (v: boolean) => void) {
+  if (!supabase) { setLeadSaved(false); return; }
   try {
     await supabase.from('leads').insert({
       email: form.email,
@@ -147,10 +178,10 @@ async function saveLead(form: FormData, result: ScoreResult, content: ProfileCon
   } catch { setLeadSaved(false); }
 }
 
-function Landing({ form, setForm, onAnalyze }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void }) {
+function Landing({ form, setForm, onAnalyze, analysisError, onDismissError }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void; analysisError: string | null; onDismissError: () => void }) {
   const [visitorCount] = useState(() => 1247 + Math.floor(Math.random() * 300));
   const [showDemo, setShowDemo] = useState(false);
-  const canAnalyze = form.demoId ? true : (form.linkedinUrl.trim().length > 0 || form.pastedContent.trim().length > 0) && form.email.trim().length > 0;
+  const canAnalyze = form.demoId ? true : (form.linkedinUrl.trim().length > 0 || form.pastedContent.trim().length > 0 || !!form.pdfFile) && form.email.trim().length > 0;
   const needsEmail = !form.demoId && !form.email.trim();
 
   return (
@@ -218,6 +249,14 @@ function Landing({ form, setForm, onAnalyze }: { form: FormData; setForm: (f: Fo
                 <label><span><Lock size={14} /> Tu email (obligatorio para recibir el informe)</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="tu@email.com" /></label>
               </div>
             </>
+          )}
+
+          {analysisError && (
+            <div className="analysis-error" role="alert">
+              <Info size={14} />
+              <p>{analysisError}</p>
+              <button type="button" onClick={onDismissError} aria-label="Cerrar aviso"><X size={14} /></button>
+            </div>
           )}
 
           <button className="button button-gold wide-button" disabled={!canAnalyze || needsEmail} onClick={onAnalyze}>

@@ -108,6 +108,12 @@ button { cursor: pointer; }
 .scan-status span.active { color: #829776; }
 .scan-status span.active i { background: #829776; }
 
+.analysis-error { display: flex; align-items: flex-start; gap: 8px; color: #d9a441; font: 11px 'DM Mono', monospace; line-height: 1.5; padding: 12px 14px; border: 1px solid #4a3a1f; background: #171310; margin-top: 14px; }
+.analysis-error p { flex: 1; margin: 0; }
+.analysis-error button { background: none; border: none; color: #d9a441; cursor: pointer; padding: 0; display: flex; }
+.privacy-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.privacy-link:hover { color: #D4AF37; }
+
 /* results */
 .results { padding: 50px 0 70px; }
 .demo-banner { display: flex; align-items: center; gap: 8px; color: #829776; font: 11px 'DM Mono', monospace; padding: 10px 16px; border: 1px solid #3a4a35; background: #131511; margin-bottom: 28px; }
