@@ -4,7 +4,8 @@ import {
   Clock3, Copy, Download, FileText, Globe2, Info, Link2, Lock, Menu,
   Radar, ScanLine, Sparkles, TrendingUp, Upload, UserRound, X, Zap,
 } from 'lucide-react';
-import { analyzeProfile, type Industry, type ProfileContent, type ScoreResult } from '@/lib/scoring';
+import { analyzeProfile, buildResult, type Industry, type ProfileContent, type ScoreResult } from '@/lib/scoring';
+import { analyzeProfileWithClaude } from '@/lib/claudeAnalysis';
 import { demoProfiles } from '@/lib/demoProfiles';
 import { supabase } from '@/lib/supabase';
 import { extractPdfText } from '@/lib/pdf';
@@ -74,8 +75,9 @@ function App() {
   const [leadSaved, setLeadSaved] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setAnalysisError(null); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
+  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setAnalysisError(null); setIsSubmitting(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
 
   const handleAnalyze = async () => {
     setAnalysisError(null);
@@ -121,9 +123,21 @@ function App() {
     }
 
     setProfileContent(content);
-    const score = analyzeProfile(content, industry);
-    setResult(score);
-    setStage('analyzing');
+    setIsSubmitting(true);
+    try {
+      const claudeOutcome = await analyzeProfileWithClaude(content, industry);
+      const score = claudeOutcome
+        ? buildResult(claudeOutcome.scores, content, industry, {
+            strengths: claudeOutcome.strengths,
+            weaknesses: claudeOutcome.weaknesses,
+            recommendations: claudeOutcome.recommendations,
+          })
+        : analyzeProfile(content, industry);
+      setResult(score);
+      setStage('analyzing');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -143,7 +157,7 @@ function App() {
         </div>
       </header>
 
-      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} />}
+      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} isSubmitting={isSubmitting} />}
       {stage === 'analyzing' && <Analyzing onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setStage('landing'); } }} />}
       {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onWaitlist={() => setStage('waitlist')} onReset={reset} />}
       {stage === 'waitlist' && <Waitlist email={form.email} onReset={reset} />}
@@ -178,7 +192,7 @@ async function saveLead(form: FormData, result: ScoreResult, content: ProfileCon
   } catch { setLeadSaved(false); }
 }
 
-function Landing({ form, setForm, onAnalyze, analysisError, onDismissError }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void; analysisError: string | null; onDismissError: () => void }) {
+function Landing({ form, setForm, onAnalyze, analysisError, onDismissError, isSubmitting }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void; analysisError: string | null; onDismissError: () => void; isSubmitting: boolean }) {
   const [visitorCount] = useState(() => 1247 + Math.floor(Math.random() * 300));
   const [showDemo, setShowDemo] = useState(false);
   const canAnalyze = form.demoId ? true : (form.linkedinUrl.trim().length > 0 || form.pastedContent.trim().length > 0 || !!form.pdfFile) && form.email.trim().length > 0;
@@ -259,8 +273,8 @@ function Landing({ form, setForm, onAnalyze, analysisError, onDismissError }: { 
             </div>
           )}
 
-          <button className="button button-gold wide-button" disabled={!canAnalyze || needsEmail} onClick={onAnalyze}>
-            Analizar mi perfil y ver mi posicion <ArrowRight size={16} />
+          <button className="button button-gold wide-button" disabled={!canAnalyze || needsEmail || isSubmitting} onClick={onAnalyze}>
+            {isSubmitting ? 'Analizando tu perfil...' : <>Analizar mi perfil y ver mi posicion <ArrowRight size={16} /></>}
           </button>
           {needsEmail && !form.demoId && <p className="input-hint center"><Lock size={12} /> Necesitamos tu email para enviarte el informe completo.</p>}
           <p className="trust-microcopy"><Lock size={12} /> No almacenamos tu perfil. Solo analizamos el contenido que nos proporcionas. Tu informe es privado.</p>

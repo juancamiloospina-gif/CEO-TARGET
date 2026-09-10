@@ -267,6 +267,30 @@ function buildRecommendations(content: ProfileContent, scores: CategoryScore, in
   return recs.slice(0, 3);
 }
 
+// Construye un ScoreResult a partir de puntajes ya calculados (ej. por el motor
+// de Claude en analyze-profile). Reutiliza los mismos helpers de nivel/percentil/
+// benchmark/confianza que analyzeProfile, para que el resto de la app (Results,
+// CategoryCard, etc.) no necesite saber que motor produjo el puntaje.
+export function buildResult(
+  scores: CategoryScore,
+  content: ProfileContent,
+  industry: Industry,
+  overrides?: { strengths?: string[]; weaknesses?: string[]; recommendations?: string[] }
+): ScoreResult {
+  const total = scores.headline + scores.about + scores.skills + scores.certifications + scores.language + scores.activity;
+  const level = getLevel(total);
+  const percentile = getPercentile(total);
+  const benchmark = getBenchmark(industry);
+  const confidence = getConfidence(content);
+  const strengths = overrides?.strengths?.length ? overrides.strengths : buildStrengths(content, scores);
+  const weaknesses = overrides?.weaknesses?.length ? overrides.weaknesses : buildWeaknesses(content, scores);
+  const recommendations = overrides?.recommendations?.length ? overrides.recommendations : buildRecommendations(content, scores, industry, content.currentRole);
+  return {
+    scores, total, level, percentile: percentile.label, percentileTop: percentile.top, benchmark,
+    strengths, weaknesses, recommendations, confidence,
+  };
+}
+
 export function analyzeProfile(content: ProfileContent, industry: Industry): ScoreResult {
   const headline = scoreHeadline(content.headline);
   const about = scoreAbout(content.about);
