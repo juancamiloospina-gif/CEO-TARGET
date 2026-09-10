@@ -23,6 +23,13 @@ const scanMessages = [
   'Comparando con benchmark de tu industria...',
 ];
 
+// Quita acentos/diacriticos para comparar cabeceras de seccion sin fallar en
+// "Educacion" vs "Educación", etc. (bug real: LinkedIn en espanol usa tildes
+// en casi todas sus cabeceras y el matching sin normalizar las perdia todas).
+function stripAccents(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function parsePastedContent(raw: string): ProfileContent {
   const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
   let headline = '';
@@ -37,16 +44,33 @@ function parsePastedContent(raw: string): ProfileContent {
   let name = '';
 
   for (const line of lines) {
-    const l = line.toLowerCase();
-    if (l.startsWith('nombre') || l.startsWith('name')) { name = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
-    if (l.startsWith('titular') || l.startsWith('headline') || l.includes('headline')) { headline = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
-    if (l.startsWith('acerca de') || l.startsWith('about') || l.includes('about') || l.startsWith('resumen') || l.startsWith('summary')) { currentSection = 'about'; continue; }
-    if (l.includes('experiencia') || l.includes('experience')) { currentSection = 'experience'; continue; }
-    if (l.includes('educacion') || l.includes('education')) { currentSection = 'education'; continue; }
-    if (l.includes('habilidades') || l.includes('skills') || l.includes('aptitudes')) { currentSection = 'skills'; continue; }
-    if (l.includes('certificacion') || l.includes('certification') || l.includes('licencias')) { currentSection = 'certifications'; continue; }
-    if (l.includes('proyectos') || l.includes('projects')) { currentSection = 'projects'; continue; }
-    if (l.includes('publicacion') || l.includes('posts') || l.includes('activity') || l.includes('actividad')) { currentSection = 'posts'; continue; }
+    const l = stripAccents(line.toLowerCase());
+    // Una linea solo cuenta como POSIBLE cabecera de seccion si es corta y no
+    // termina como una frase de parrafo. Sin esto, una frase normal como
+    // "...datos para publicaciones academicas..." disparaba por error la
+    // seccion de "Actividad reciente" solo por contener la palabra
+    // "publicaciones" (bug real encontrado probando con un PDF real).
+    const looksLikeHeader = line.length <= 40 && !/[.,;:]$/.test(line);
+
+    if (looksLikeHeader && (l.startsWith('nombre') || l.startsWith('name'))) { name = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
+    if (looksLikeHeader && (l.startsWith('titular') || l.startsWith('headline'))) { headline = line.split(/[:—-]/).slice(1).join('').trim() || line; currentSection = ''; continue; }
+    if (looksLikeHeader && (l.startsWith('acerca de') || l.startsWith('about') || l.startsWith('resumen') || l.startsWith('summary') || l.startsWith('extracto'))) { currentSection = 'about'; continue; }
+    if (looksLikeHeader && (l === 'experiencia' || l.startsWith('experience'))) { currentSection = 'experience'; continue; }
+    if (looksLikeHeader && (l.startsWith('educacion') || l.startsWith('education'))) { currentSection = 'education'; continue; }
+    if (looksLikeHeader && (l.startsWith('habilidades') || l.startsWith('skills') || l.startsWith('aptitudes'))) { currentSection = 'skills'; continue; }
+    if (looksLikeHeader && (l.startsWith('certificacion') || l.startsWith('certification') || l.startsWith('licencias'))) { currentSection = 'certifications'; continue; }
+    if (looksLikeHeader && (l.startsWith('proyectos') || l.startsWith('projects'))) { currentSection = 'projects'; continue; }
+    if (looksLikeHeader && (l.startsWith('publicacion') || l.startsWith('posts') || l.startsWith('activity') || l.startsWith('actividad'))) { currentSection = 'posts'; continue; }
+    // Idiomas y datos de contacto no aportan senal de IA: se descartan en vez
+    // de colar como skills/certificaciones falsas.
+    if (looksLikeHeader && (l.startsWith('languages') || l.startsWith('idiomas'))) { currentSection = 'ignore'; continue; }
+    if (looksLikeHeader && (l.startsWith('contactar') || l.startsWith('contact'))) { currentSection = 'ignore'; continue; }
+    // Heuristica: un titular estilo LinkedIn suele venir en clausulas
+    // separadas por " | " (ej. "Head of Growth | +40% CRO | Automatizacion").
+    // Se aplica sin importar la seccion activa, porque en un PDF real el
+    // nombre+titular aparecen despues de la barra lateral (skills/certs) sin
+    // ninguna cabecera propia que resetee la seccion.
+    if (!headline && / \| /.test(line) && line.length < 220) { headline = line; currentSection = ''; continue; }
     if (currentSection === 'about') about += (about ? '\n' : '') + line;
     else if (currentSection === 'experience') experience.push(line);
     else if (currentSection === 'education') education.push(line);
@@ -54,6 +78,7 @@ function parsePastedContent(raw: string): ProfileContent {
     else if (currentSection === 'certifications') certifications.push(line);
     else if (currentSection === 'projects') projects.push(line);
     else if (currentSection === 'posts') recentPosts.push(line);
+    else if (currentSection === 'ignore') { /* descartado a proposito */ }
     else if (!headline && !name && line.length < 120) headline = line;
   }
 
