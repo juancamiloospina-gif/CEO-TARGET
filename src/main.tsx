@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import AdminPanel from './AdminPanel.tsx';
+import { ErrorBoundary } from './ErrorBoundary.tsx';
 import './index.css';
 
 // Panel interno oculto: solo se monta con ?admin=1 en la URL. Nunca hay un
@@ -10,6 +11,8 @@ const isAdminRoute = new URLSearchParams(window.location.search).get('admin') ==
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isAdminRoute ? <AdminPanel /> : <App />}
+    <ErrorBoundary>
+      {isAdminRoute ? <AdminPanel /> : <App />}
+    </ErrorBoundary>
   </StrictMode>
 );

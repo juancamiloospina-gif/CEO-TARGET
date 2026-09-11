@@ -1,20 +1,26 @@
-// Fase 2 (v2): en vez de vender una pildora de 70 EUR de entrada, primero
-// entendemos el problema real del empresario, le damos un mini-diagnostico
-// de valor genuino (generado con Claude, sin costo para el), y con eso
-// construimos un perfil de negocio que alimenta el pipeline de venta
-// consultiva de Cupperlab (Fase 3), en vez de forzar una venta de
-// autoservicio que el prospecto todavia no esta listo para comprar.
+// Fase 2 (v3): el objetivo dejo de ser "vender una pildora de 70 EUR" o
+// incluso "vender un curso" — eso es ticket pequeno. El objetivo real es
+// calificar al prospecto para una consultoria de IA para empresas ANTES de
+// agendar una llamada: Cupperlab suele tener el contacto directo del
+// decisor (via outbound), asi que este cuestionario es la unica oportunidad
+// de entender el problema real ANTES de esa llamada. Por eso:
+// - Se cambio `toolLevel` (que herramientas usan) por dos preguntas que
+//   predicen si vale la pena agendar: quien decide, y que tan doloroso es
+//   el problema hoy. `toolLevel` era util para recomendar contenido/curso,
+//   no para calificar una venta de consultoria.
+// - El formulario sigue siendo 4 preguntas (no crece): la pagina "no puede
+//   ser eterna" o nadie la completa (decision de Juan).
 
 export type TeamSize = 'solo' | '2-10' | '11-50' | '51-200' | '200+';
 export type Bottleneck = 'ventas' | 'atencion_cliente' | 'operaciones' | 'marketing_contenido' | 'datos_reportes';
-export type ToolLevel = 'ninguna' | 'herramientas_sueltas' | 'automatizaciones_basicas' | 'sistemas_propios';
-export type Urgency = 'explorando' | 'evaluando_proveedores' | 'presupuesto_asignado' | 'quiere_implementar_ya';
+export type DecisionRole = 'decido_yo' | 'yo_influyo' | 'solo_explorando';
+export type PainIntensity = 'leve' | 'moderado' | 'alto' | 'critico';
 
 export type BusinessDiagnosticAnswers = {
   teamSize: TeamSize;
   bottleneck: Bottleneck;
-  toolLevel: ToolLevel;
-  urgency: Urgency;
+  decisionRole: DecisionRole;
+  painIntensity: PainIntensity;
 };
 
 export type QuestionOption<T extends string> = { value: T; label: string };
@@ -35,18 +41,24 @@ export const bottleneckOptions: QuestionOption<Bottleneck>[] = [
   { value: 'datos_reportes', label: 'Analisis de datos y reportes' },
 ];
 
-export const toolLevelOptions: QuestionOption<ToolLevel>[] = [
-  { value: 'ninguna', label: 'Nada todavia' },
-  { value: 'herramientas_sueltas', label: 'Herramientas sueltas (ChatGPT, Canva IA, etc.)' },
-  { value: 'automatizaciones_basicas', label: 'Automatizaciones basicas (Zapier, Make, etc.)' },
-  { value: 'sistemas_propios', label: 'Sistemas propios o a medida' },
+// Eje "accesibilidad del decisor" del outbound scoring de Cupperlab
+// (00_Operating_System/26). Es el dato que mas cambia si vale la pena
+// agendar una llamada: hablar con quien no decide nada es tiempo perdido
+// para ambos lados.
+export const decisionRoleOptions: QuestionOption<DecisionRole>[] = [
+  { value: 'decido_yo', label: 'Yo tomo la decision final' },
+  { value: 'yo_influyo', label: 'Yo influyo, pero no decido solo' },
+  { value: 'solo_explorando', label: 'Estoy explorando, no decido' },
 ];
 
-export const urgencyOptions: QuestionOption<Urgency>[] = [
-  { value: 'explorando', label: 'Explorando, sin plan concreto' },
-  { value: 'evaluando_proveedores', label: 'Evaluando opciones o proveedores' },
-  { value: 'presupuesto_asignado', label: 'Ya tenemos presupuesto asignado' },
-  { value: 'quiere_implementar_ya', label: 'Queremos implementar ya' },
+// Eje "dolor visible" del outbound scoring: cuantifica la intensidad, no
+// solo la categoria (que ya da `bottleneck`). Sin esto, "ventas" podia ser
+// un dolor de nivel 2 o de nivel 9 y se veian identicos en el panel.
+export const painIntensityOptions: QuestionOption<PainIntensity>[] = [
+  { value: 'leve', label: 'Es una molestia, pero convivimos con ella' },
+  { value: 'moderado', label: 'Nos quita tiempo real cada semana' },
+  { value: 'alto', label: 'Nos esta costando dinero o clientes' },
+  { value: 'critico', label: 'Es urgente, esta frenando el negocio' },
 ];
 
 export type MiniReport = {
@@ -109,4 +121,21 @@ const bottleneckFallback: Record<Bottleneck, MiniReport> = {
 
 export function buildFallbackMiniReport(bottleneck: Bottleneck): MiniReport {
   return bottleneckFallback[bottleneck];
+}
+
+// Score simple de calificacion (eje "dolor" + eje "accesibilidad del
+// decisor" del outbound engine de Cupperlab). NO es un score de IA Maturity
+// ni pretende ser cientifico: es una heuristica para que el panel interno
+// ordene por "a quien llamo primero" en vez de por fecha de envio.
+const painWeight: Record<PainIntensity, number> = { leve: 1, moderado: 2, alto: 3, critico: 4 };
+const decisionWeight: Record<DecisionRole, number> = { decido_yo: 3, yo_influyo: 2, solo_explorando: 1 };
+
+export function getConsultingReadiness(answers: Pick<BusinessDiagnosticAnswers, 'painIntensity' | 'decisionRole'>): {
+  score: number; // 2-7
+  label: 'Alta prioridad' | 'Prioridad media' | 'Prioridad baja';
+} {
+  const score = painWeight[answers.painIntensity] + decisionWeight[answers.decisionRole];
+  if (score >= 6) return { score, label: 'Alta prioridad' };
+  if (score >= 4) return { score, label: 'Prioridad media' };
+  return { score, label: 'Prioridad baja' };
 }

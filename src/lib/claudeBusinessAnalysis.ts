@@ -1,6 +1,6 @@
 import type { BusinessDiagnosticAnswers, MiniReport } from '@/lib/businessDiagnostic';
 import {
-  bottleneckOptions, buildFallbackMiniReport, teamSizeOptions, toolLevelOptions, urgencyOptions,
+  bottleneckOptions, buildFallbackMiniReport, decisionRoleOptions, painIntensityOptions, teamSizeOptions,
 } from '@/lib/businessDiagnostic';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -44,10 +44,10 @@ async function callBusinessDiagnostic(
         teamSize: labelFor(teamSizeOptions, answers.teamSize),
         bottleneck: answers.bottleneck,
         bottleneckLabel: labelFor(bottleneckOptions, answers.bottleneck),
-        toolLevel: answers.toolLevel,
-        toolLevelLabel: labelFor(toolLevelOptions, answers.toolLevel),
-        urgency: answers.urgency,
-        urgencyLabel: labelFor(urgencyOptions, answers.urgency),
+        decisionRole: answers.decisionRole,
+        decisionRoleLabel: labelFor(decisionRoleOptions, answers.decisionRole),
+        painIntensity: answers.painIntensity,
+        painIntensityLabel: labelFor(painIntensityOptions, answers.painIntensity),
       }),
     });
     if (!res.ok) return null;

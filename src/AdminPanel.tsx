@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { getConsultingReadiness, type DecisionRole, type PainIntensity } from '@/lib/businessDiagnostic';
 
 // Panel interno (solo Cupperlab): junta el score de Fase 1 y el diagnostico
 // de negocio de Fase 2 de cada prospecto en una sola vista, en vez de cruzar
@@ -28,13 +29,30 @@ type Prospect = {
   businessDiagnostic: {
     team_size: string | null;
     bottleneck: string | null;
-    tool_level: string | null;
-    urgency: string | null;
+    decision_role: string | null;
+    pain_intensity: string | null;
     wants_contact: boolean | null;
     mini_report: { headline?: string; recommendations?: string[]; closingNote?: string } | null;
     created_at: string;
   } | null;
 };
+
+// Badge de prioridad para triage rapido: junta el eje "dolor" y el eje
+// "accesibilidad del decisor" del outbound scoring de Cupperlab
+// (getConsultingReadiness, en businessDiagnostic.ts) para que Juan sepa a
+// quien llamar primero sin tener que leer cada fila completa.
+function ConsultingPriorityBadge({ diagnostic }: { diagnostic: Prospect['businessDiagnostic'] }) {
+  if (!diagnostic?.decision_role || !diagnostic?.pain_intensity) return null;
+  const { label } = getConsultingReadiness({
+    decisionRole: diagnostic.decision_role as DecisionRole,
+    painIntensity: diagnostic.pain_intensity as PainIntensity,
+  });
+  const className =
+    label === 'Alta prioridad' ? 'admin-priority admin-priority-high'
+      : label === 'Prioridad media' ? 'admin-priority admin-priority-mid'
+      : 'admin-priority admin-priority-low';
+  return <span className={className}>{label.toUpperCase()}</span>;
+}
 
 export default function AdminPanel() {
   const [adminKey, setAdminKey] = useState('');
@@ -110,6 +128,7 @@ export default function AdminPanel() {
               </div>
               <div className="admin-row-meta">
                 {p.score !== null && p.score > 0 && <span className="admin-score">{p.score}/100</span>}
+                <ConsultingPriorityBadge diagnostic={p.businessDiagnostic} />
                 {p.businessDiagnostic?.wants_contact && <span className="admin-flag">QUIERE CONTACTO</span>}
                 <span className="admin-date">{new Date(p.created_at).toLocaleDateString('es')}</span>
               </div>
@@ -131,7 +150,7 @@ export default function AdminPanel() {
                   <h3>Fase 2 · Diagnostico de negocio</h3>
                   {p.businessDiagnostic ? (
                     <>
-                      <p><b>Equipo:</b> {p.businessDiagnostic.team_size} · <b>Cuello de botella:</b> {p.businessDiagnostic.bottleneck} · <b>Herramientas:</b> {p.businessDiagnostic.tool_level} · <b>Momento:</b> {p.businessDiagnostic.urgency}</p>
+                      <p><b>Equipo:</b> {p.businessDiagnostic.team_size} · <b>Cuello de botella:</b> {p.businessDiagnostic.bottleneck} · <b>Rol en decision:</b> {p.businessDiagnostic.decision_role} · <b>Dolor:</b> {p.businessDiagnostic.pain_intensity}</p>
                       {p.businessDiagnostic.wants_contact && <p className="admin-flag-inline">Pidio contacto directo de un consultor.</p>}
                       {p.businessDiagnostic.mini_report?.headline && (
                         <div className="admin-mini-report">

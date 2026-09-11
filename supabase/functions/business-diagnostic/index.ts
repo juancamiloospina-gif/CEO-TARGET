@@ -1,8 +1,12 @@
 // Supabase Edge Function: business-diagnostic
 //
-// Fase 2 (v2) del funnel: genera un mini-reporte personalizado sobre COMO
+// Fase 2 (v3) del funnel: genera un mini-reporte personalizado sobre COMO
 // aplicar IA al problema de negocio que el prospecto acaba de declarar
-// (cuello de botella, tamano de equipo, herramientas actuales, urgencia).
+// (cuello de botella, tamano de equipo, rol en la decision, intensidad del
+// dolor). El objetivo de fondo ya no es vender un curso (ticket pequeno):
+// es calificar si vale la pena que Cupperlab agende una llamada de
+// consultoria con esta persona, y darle igual algo de valor real a cambio
+// de haber contestado.
 //
 // A diferencia de analyze-profile (que puntua evidencia textual de un
 // perfil), esta funcion no evalua ni puntua nada: da orientacion generica
@@ -28,10 +32,10 @@ type DiagnosticInput = {
   teamSize: string;
   bottleneck: string;
   bottleneckLabel: string;
-  toolLevel: string;
-  toolLevelLabel: string;
-  urgency: string;
-  urgencyLabel: string;
+  decisionRole: string;
+  decisionRoleLabel: string;
+  painIntensity: string;
+  painIntensityLabel: string;
 };
 
 const SYSTEM_PROMPT = `Eres un consultor senior de Cupperlab (agencia de automatizacion e IA) dando una primera orientacion GRATUITA y honesta a un empresario, a partir de un mini-cuestionario que acaba de responder.
@@ -39,10 +43,10 @@ const SYSTEM_PROMPT = `Eres un consultor senior de Cupperlab (agencia de automat
 REGLAS NO NEGOCIABLES:
 1. No inventes cifras, porcentajes de mejora, plazos de implementacion ni resultados garantizados. No conoces los numeros reales de este negocio.
 2. No inventes datos sobre la empresa que no se te dieron (nombre, clientes, ingresos, etc.).
-3. Las recomendaciones deben ser accionables y especificas al cuello de botella y al nivel de herramientas que declaro (no genericas tipo "usa mas IA").
-4. Si ya tiene automatizaciones o sistemas propios, no le recomiendes lo basico que ya hace; sube el nivel de la recomendacion.
-5. Si no tiene nada todavia, no le recomiendes algo que requiere un equipo tecnico dedicado: empieza simple.
-6. Tono: directo, profesional, sin venta agresiva. Esto es valor real, no un discurso de ventas.
+3. Las recomendaciones deben ser accionables y especificas al cuello de botella declarado (no genericas tipo "usa mas IA").
+4. Usa la intensidad del dolor declarada para calibrar el tono: si es critico, valida que es urgente sin dramatizar; si es leve, no le inventes una urgencia que no tiene.
+5. No le recomiendes algo que requiere un equipo tecnico dedicado si no hay indicios de que lo tenga: empieza simple.
+6. Tono: directo, profesional, sin venta agresiva. Esto es valor real, no un discurso de ventas. Nunca menciones precio ni ofrezcas cerrar nada — eso lo decide un humano de Cupperlab despues.
 7. Nunca prometas resultados de Cupperlab ni asumas que va a contratar nada.
 
 Responde EXCLUSIVAMENTE con un JSON valido, sin texto adicional, con esta forma exacta:
@@ -71,8 +75,8 @@ Score AI Maturity (Fase 1, si existe): ${input.aiScore ?? 'no disponible'} — n
 Respuestas del mini-cuestionario:
 - Tamano de equipo: ${input.teamSize}
 - Mayor cuello de botella: ${input.bottleneckLabel}
-- Herramientas de IA/automatizacion actuales: ${input.toolLevelLabel}
-- Momento respecto a implementar IA: ${input.urgencyLabel}
+- Rol en la decision: ${input.decisionRoleLabel}
+- Intensidad del dolor hoy: ${input.painIntensityLabel}
 
 Da la orientacion inicial segun las reglas del sistema.`;
 

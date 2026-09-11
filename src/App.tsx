@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowRight, Check, CheckCircle2, ChevronRight,
-  Copy, Download, FileText, Globe2, Info, Link2, Lock, Menu,
-  Radar, ScanLine, Sparkles, Upload, UserRound, X, Zap,
+  Copy, Download, FileText, Globe2, Info, Link2, Lock, Mail, Menu,
+  PlayCircle, Radar, ScanLine, Sparkles, Upload, UserRound, X, Zap,
 } from 'lucide-react';
 import { analyzeProfile, buildResult, type Industry, type ProfileContent, type ScoreResult } from '@/lib/scoring';
 import { analyzeProfileWithClaude } from '@/lib/claudeAnalysis';
@@ -10,11 +10,12 @@ import { demoProfiles } from '@/lib/demoProfiles';
 import { supabase } from '@/lib/supabase';
 import { extractPdfText } from '@/lib/pdf';
 import {
-  type Bottleneck, type BusinessDiagnosticAnswers, type MiniReport, type TeamSize, type ToolLevel, type Urgency,
-  bottleneckOptions, buildFallbackMiniReport, teamSizeOptions, toolLevelOptions, urgencyOptions,
+  type Bottleneck, type BusinessDiagnosticAnswers, type DecisionRole, type MiniReport, type PainIntensity, type TeamSize,
+  bottleneckOptions, buildFallbackMiniReport, decisionRoleOptions, painIntensityOptions, teamSizeOptions,
 } from '@/lib/businessDiagnostic';
 import { generateMiniReport } from '@/lib/claudeBusinessAnalysis';
 import { buildLinkedInPostText, downloadCanvasAsPng, renderShareCard } from '@/lib/shareCard';
+import { getCourseForBottleneck } from '@/lib/courses';
 
 type Stage = 'landing' | 'analyzing' | 'results' | 'diagnostic' | 'mini-report';
 type FormData = { linkedinUrl: string; pastedContent: string; pdfFile: File | null; email: string; industry: Industry; demoId: string | null };
@@ -104,7 +105,7 @@ function App() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [profileContent, setProfileContent] = useState<ProfileContent | null>(null);
   const [leadSaved, setLeadSaved] = useState(false);
-  const [diagnosticAnswers, setDiagnosticAnswers] = useState<BusinessDiagnosticAnswers>({ teamSize: '2-10', bottleneck: 'ventas', toolLevel: 'ninguna', urgency: 'explorando' });
+  const [diagnosticAnswers, setDiagnosticAnswers] = useState<BusinessDiagnosticAnswers>({ teamSize: '2-10', bottleneck: 'ventas', decisionRole: 'decido_yo', painIntensity: 'moderado' });
   const [wantsContact, setWantsContact] = useState(false);
   const [miniReport, setMiniReport] = useState<MiniReport | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -185,6 +186,16 @@ function App() {
           })
         : analyzeProfile(content, industry);
       setResult(score);
+    } catch (err) {
+      // Bug real: sin este catch, cualquier fallo aqui (p.ej. un error
+      // inesperado del motor deterministico local) dejaba `result` en null
+      // y la promesa de handleAnalyze rechazada sin manejar. La pantalla de
+      // Analizando SI reaccionaba bien (volvia a landing con error), pero
+      // el rechazo sin capturar quedaba en consola como ruido. Lo dejamos
+      // explicito y logueado para poder diagnosticar futuros casos reales.
+      // eslint-disable-next-line no-console
+      console.error('[handleAnalyze] Fallo inesperado analizando el perfil:', err);
+      setResult(null);
     } finally {
       setIsSubmitting(false);
       setAnalysisReady(true);
@@ -239,7 +250,7 @@ function App() {
         />
       )}
       {stage === 'mini-report' && miniReport && (
-        <MiniReportView report={miniReport} wantsContact={wantsContact} diagnosticSaved={diagnosticSaved} isTestMode={isTestMode} onReset={reset} />
+        <MiniReportView report={miniReport} bottleneck={diagnosticAnswers.bottleneck} wantsContact={wantsContact} diagnosticSaved={diagnosticSaved} isTestMode={isTestMode} onReset={reset} />
       )}
 
       <footer className="footer">
@@ -272,11 +283,12 @@ async function saveLead(form: FormData, result: ScoreResult, content: ProfileCon
   } catch { setLeadSaved(false); }
 }
 
-// Fase 2 (v2): guarda el diagnostico de negocio (cuello de botella, tamano
-// de equipo, herramientas actuales, urgencia) junto con el mini-reporte
-// generado. Este es el "perfil del empresario" que alimenta la Fase 3: sin
-// esto, cada conversacion de venta empieza de cero; con esto, Cupperlab
-// sabe de antemano cual es el problema real antes de escribirle a alguien.
+// Fase 2 (v3): guarda el diagnostico de negocio (cuello de botella, tamano
+// de equipo, quien decide, y que tan doloroso es el problema hoy) junto con
+// el mini-reporte generado. Este es el "perfil de calificacion" que
+// alimenta la Fase 3 (consultoria, no cursos): sin esto, cada conversacion
+// de venta empieza de cero; con esto, Cupperlab sabe de antemano si vale la
+// pena agendar la llamada, y con quien.
 // Requiere la tabla `business_diagnostics` (ver supabase/migrations) — si
 // todavia no existe, el insert falla en silencio y el prospecto igual ve su
 // mini-reporte (nunca se le bloquea el valor por un problema nuestro de
@@ -298,8 +310,8 @@ async function saveBusinessDiagnostic(
       ai_level: result?.level ?? null,
       team_size: answers.teamSize,
       bottleneck: answers.bottleneck,
-      tool_level: answers.toolLevel,
-      urgency: answers.urgency,
+      decision_role: answers.decisionRole,
+      pain_intensity: answers.painIntensity,
       mini_report: report,
       wants_contact: wantsContact,
       status: wantsContact
@@ -598,9 +610,21 @@ function ShareCardSection({ result, industry }: { result: ScoreResult; industry:
       if (cancelled) return;
       canvasElRef.current = canvas;
       canvas.className = 'share-card-canvas';
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
-        containerRef.current.appendChild(canvas);
+      const container = containerRef.current;
+      if (container) {
+        // Bug real: antes se hacia `containerRef.current.innerHTML = ''` en
+        // el MISMO div donde React renderizaba condicionalmente el texto de
+        // "Generando tarjeta..." ({!ready && <div>...}). Cuando `ready` pasaba
+        // a true, React intentaba remover ESE nodo (que el innerHTML='' ya
+        // habia borrado por fuera de React) y tiraba
+        // "Failed to execute 'removeChild': The node to be removed is not a
+        // child of this node" — sin ErrorBoundary, eso desmontaba TODA la
+        // app y dejaba solo el fondo negro. Fix: este div (ver JSX abajo)
+        // ahora NUNCA tiene hijos renderizados por React — es
+        // responsabilidad exclusiva de este efecto, asi que limpiarlo e
+        // insertar el canvas aqui nunca choca con la reconciliacion de React.
+        while (container.firstChild) container.removeChild(container.firstChild);
+        container.appendChild(canvas);
       }
       setReady(true);
     });
@@ -623,7 +647,13 @@ function ShareCardSection({ result, industry }: { result: ScoreResult; industry:
       <h2>Presume tu posicion en LinkedIn</h2>
       <p className="share-card-hint">Descarga la imagen y copia el texto. Ambos se suben a mano a tu post: LinkedIn no permite publicar en automatico desde aqui.</p>
       <div className="share-card-layout">
-        <div className="share-card-preview" ref={containerRef}>{!ready && <div className="share-card-loading">Generando tarjeta...</div>}</div>
+        <div className="share-card-preview-wrap">
+          {!ready && <div className="share-card-loading">Generando tarjeta...</div>}
+          {/* Este div nunca recibe hijos de React: el canvas se inserta a mano
+              en el useEffect de arriba. Mantenerlo siempre vacio en el JSX es
+              lo que evita el choque de reconciliacion (ver comentario arriba). */}
+          <div className="share-card-preview" ref={containerRef} />
+        </div>
         <div className="share-card-actions">
           <button className="button button-gold" disabled={!ready} onClick={handleDownload}><Download size={16} /> Descargar imagen</button>
           <button className="action-btn" onClick={handleCopyText}><Copy size={15} /> {copied ? 'Copiado' : 'Copiar texto del post'}</button>
@@ -687,18 +717,18 @@ function BusinessDiagnosticForm({
           </div>
         </DiagnosticQuestion>
 
-        <DiagnosticQuestion label="¿Que usan hoy en IA o automatizacion?">
+        <DiagnosticQuestion label="¿Cual es tu rol en esta decision?">
           <div className="diagnostic-options">
-            {toolLevelOptions.map((o) => (
-              <button key={o.value} className={answers.toolLevel === o.value ? 'diagnostic-option is-selected' : 'diagnostic-option'} onClick={() => setAnswers({ ...answers, toolLevel: o.value as ToolLevel })}>{o.label}</button>
+            {decisionRoleOptions.map((o) => (
+              <button key={o.value} className={answers.decisionRole === o.value ? 'diagnostic-option is-selected' : 'diagnostic-option'} onClick={() => setAnswers({ ...answers, decisionRole: o.value as DecisionRole })}>{o.label}</button>
             ))}
           </div>
         </DiagnosticQuestion>
 
-        <DiagnosticQuestion label="¿En que momento estan respecto a implementar IA?">
+        <DiagnosticQuestion label="¿Que tan doloroso es este problema hoy?">
           <div className="diagnostic-options">
-            {urgencyOptions.map((o) => (
-              <button key={o.value} className={answers.urgency === o.value ? 'diagnostic-option is-selected' : 'diagnostic-option'} onClick={() => setAnswers({ ...answers, urgency: o.value as Urgency })}>{o.label}</button>
+            {painIntensityOptions.map((o) => (
+              <button key={o.value} className={answers.painIntensity === o.value ? 'diagnostic-option is-selected' : 'diagnostic-option'} onClick={() => setAnswers({ ...answers, painIntensity: o.value as PainIntensity })}>{o.label}</button>
             ))}
           </div>
         </DiagnosticQuestion>
@@ -726,7 +756,7 @@ function DiagnosticQuestion({ label, children }: { label: string; children: Reac
   );
 }
 
-function MiniReportView({ report, wantsContact, diagnosticSaved, isTestMode, onReset }: { report: MiniReport; wantsContact: boolean; diagnosticSaved: boolean; isTestMode: boolean; onReset: () => void }) {
+function MiniReportView({ report, bottleneck, wantsContact, diagnosticSaved, isTestMode, onReset }: { report: MiniReport; bottleneck: Bottleneck; wantsContact: boolean; diagnosticSaved: boolean; isTestMode: boolean; onReset: () => void }) {
   return (
     <main className="mini-report page-wrap">
       <div className="mini-report-card">
@@ -748,10 +778,54 @@ function MiniReportView({ report, wantsContact, diagnosticSaved, isTestMode, onR
         {!diagnosticSaved && (
           <p className="analysis-error">No pudimos guardar tu diagnostico esta vez, pero el contenido de arriba es tuyo igual.</p>
         )}
+      </div>
 
+      <ConsultingCTA wantsContact={wantsContact} />
+
+      <CoursesTeaser bottleneck={bottleneck} />
+
+      <div className="mini-report-back">
         <button className="button button-gold" onClick={onReset}>Volver al inicio <ArrowRight size={16} /></button>
       </div>
     </main>
+  );
+}
+
+// Fase 2.5 (v2): el CTA principal tras el diagnostico ya no es "compra un
+// curso" (ticket pequeno) sino "hablemos de tu negocio" — consultoria de
+// IA para empresas. Cupperlab suele tener el contacto directo del decisor
+// via outbound, asi que este boton es la bisagra real entre el formulario
+// gratuito y una llamada comercial agendada. Sin precio en pantalla: precio
+// y alcance siguen siendo checkpoint humano del Cupperlab Way.
+function ConsultingCTA({ wantsContact }: { wantsContact: boolean }) {
+  const mailtoHref = `mailto:juancamilo@cupperlab.com?subject=${encodeURIComponent('Quiero hablar con Cupperlab sobre mi diagnostico')}&body=${encodeURIComponent('Hola, acabo de completar mi diagnostico de negocio con Cupperlab y quiero agendar una conversacion.')}`;
+
+  return (
+    <section className="consulting-cta">
+      <span className="section-label">TU SIGUIENTE PASO</span>
+      <h2>¿Resolvemos esto juntos?</h2>
+      <p>Con lo que nos contaste ya podemos ver por donde empezar. Una llamada corta basta para saber si tiene sentido trabajar juntos — sin compromiso.</p>
+      <a className="button button-gold wide-button" href={mailtoHref}><Mail size={16} /> Quiero agendar esa llamada</a>
+      {wantsContact && (
+        <p className="consulting-cta-note"><CheckCircle2 size={14} /> Ya nos pediste contacto directo — te escribimos pronto de todas formas.</p>
+      )}
+    </section>
+  );
+}
+
+// El curso del bottleneck declarado sigue existiendo, pero como oferta
+// secundaria de ticket pequeno: una linea, no el temario completo. La
+// consultoria (arriba) es la conversion principal de esta pagina.
+function CoursesTeaser({ bottleneck }: { bottleneck: Bottleneck }) {
+  const recommended = getCourseForBottleneck(bottleneck);
+  const mailtoHref = `mailto:juancamilo@cupperlab.com?subject=${encodeURIComponent(`Quiero acceso al curso: ${recommended.title}`)}&body=${encodeURIComponent('Hola, acabo de hacer mi diagnostico de negocio con Cupperlab y quiero mas informacion sobre este curso.')}`;
+
+  return (
+    <section className="courses-teaser">
+      <PlayCircle size={16} />
+      <p>¿Prefieres aprender a tu ritmo primero? Tenemos <b>{recommended.title}</b>, enfocado justo en esto.</p>
+      <a href={mailtoHref}>Ver detalles</a>
+    </section>
   );
 }
 

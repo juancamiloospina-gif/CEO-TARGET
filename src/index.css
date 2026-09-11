@@ -279,14 +279,33 @@ button { cursor: pointer; }
 .diagnostic-option.is-selected { background: #1a1611; border-color: #D4AF37; color: #D4AF37; }
 .diagnostic-checkbox { display: flex; align-items: flex-start; gap: 10px; font-size: 12px; color: #999; cursor: pointer; }
 .diagnostic-checkbox input { margin-top: 3px; }
-.mini-report { display: flex; justify-content: center; padding: 40px 0 60px; }
+.mini-report { display: flex; flex-direction: column; align-items: center; padding: 40px 0 60px; gap: 40px; }
 .mini-report-card { max-width: 620px; width: 100%; }
 .mini-report-card > h1 { font-family: 'Playfair Display', serif; font-size: 28px; line-height: 1.35; margin: 10px 0 24px; }
 .mini-report-recs { display: grid; gap: 10px; margin-bottom: 22px; }
 .mini-report-closing { color: #999; font-size: 13px; line-height: 1.6; margin: 0 0 20px; }
+.mini-report-back { width: 100%; max-width: 620px; }
+.mini-report-back .button { width: 100%; }
 @media (max-width: 720px) {
   .diagnostic-hero h1 { font-size: 24px; }
   .mini-report-card > h1 { font-size: 22px; }
+}
+
+/* Fase 2.5 (v2): CTA de consultoria (conversion principal) + teaser de
+   curso (secundario, ticket pequeno) tras el mini-reporte. */
+.consulting-cta { width: 100%; max-width: 620px; border-top: 1px solid #2a2a2a; padding-top: 34px; text-align: center; }
+.consulting-cta h2 { font-family: 'Playfair Display', serif; font-size: 26px; margin: 8px 0 10px; }
+.consulting-cta p { color: #999; font-size: 13px; line-height: 1.6; max-width: 480px; margin: 0 auto 20px; }
+.consulting-cta .wide-button { max-width: 360px; margin: 0 auto; }
+.consulting-cta-note { display: flex; align-items: center; justify-content: center; gap: 6px; color: #D4AF37; font-size: 12px; margin: 14px 0 0; }
+
+.courses-teaser { width: 100%; max-width: 620px; display: flex; align-items: center; gap: 10px; background: #111; border: 1px solid #222; padding: 14px 16px; color: #706d67; }
+.courses-teaser p { flex: 1; font-size: 12px; line-height: 1.5; margin: 0; }
+.courses-teaser p b { color: #ccc; font-weight: 600; }
+.courses-teaser a { color: #D4AF37; font-size: 12px; font-weight: 600; white-space: nowrap; text-decoration: none; }
+.courses-teaser a:hover { text-decoration: underline; }
+@media (max-width: 640px) {
+  .courses-teaser { flex-wrap: wrap; }
 }
 
 /* Modo prueba (solo visible en npm run dev) */
@@ -299,9 +318,10 @@ button { cursor: pointer; }
 .share-card-section h2 { font-family: 'Playfair Display', serif; font-size: 22px; margin: 8px 0 6px; }
 .share-card-hint { color: #999; font-size: 13px; max-width: 560px; margin: 0 0 20px; }
 .share-card-layout { display: flex; gap: 30px; align-items: flex-start; flex-wrap: wrap; }
-.share-card-preview { width: 220px; aspect-ratio: 4 / 5; background: #111; border: 1px solid #2a2a2a; display: flex; align-items: center; justify-content: center; flex: none; }
+.share-card-preview-wrap { position: relative; width: 220px; aspect-ratio: 4 / 5; background: #111; border: 1px solid #2a2a2a; flex: none; }
+.share-card-preview { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .share-card-canvas { width: 220px; height: auto; display: block; }
-.share-card-loading { color: #706d67; font: 11px 'DM Mono', monospace; text-align: center; padding: 0 12px; }
+.share-card-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #706d67; font: 11px 'DM Mono', monospace; text-align: center; padding: 0 12px; }
 .share-card-actions { display: flex; flex-direction: column; gap: 10px; align-self: center; }
 @media (max-width: 600px) {
   .share-card-layout { flex-direction: column; align-items: center; }
@@ -324,6 +344,10 @@ button { cursor: pointer; }
 .admin-row-meta { display: flex; align-items: center; gap: 10px; font: 11px 'DM Mono', monospace; color: #999; }
 .admin-score { color: #D4AF37; font-weight: 700; }
 .admin-flag { background: #1a1611; border: 1px solid #4a3a1f; color: #D4AF37; padding: 3px 8px; }
+.admin-priority { font: 10px 'DM Mono', monospace; letter-spacing: .05em; padding: 3px 8px; border: 1px solid; }
+.admin-priority-high { color: #D4AF37; border-color: #4a3a1f; background: #1a1611; }
+.admin-priority-mid { color: #ccc; border-color: #333; background: #161616; }
+.admin-priority-low { color: #706d67; border-color: #222; background: #0d0d0d; }
 .admin-row-detail { border-top: 1px solid #2a2a2a; padding: 18px; display: grid; gap: 16px; }
 .admin-detail-block h3 { font-size: 13px; color: #D4AF37; margin: 0 0 8px; }
 .admin-detail-block p { font-size: 13px; color: #bbb; line-height: 1.6; margin: 0 0 6px; }
