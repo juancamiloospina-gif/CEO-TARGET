@@ -14,6 +14,7 @@ import {
   bottleneckOptions, buildFallbackMiniReport, teamSizeOptions, toolLevelOptions, urgencyOptions,
 } from '@/lib/businessDiagnostic';
 import { generateMiniReport } from '@/lib/claudeBusinessAnalysis';
+import { buildLinkedInPostText, downloadCanvasAsPng, renderShareCard } from '@/lib/shareCard';
 
 type Stage = 'landing' | 'analyzing' | 'results' | 'diagnostic' | 'mini-report';
 type FormData = { linkedinUrl: string; pastedContent: string; pdfFile: File | null; email: string; industry: Industry; demoId: string | null };
@@ -572,6 +573,8 @@ function Results({ result, content, form, leadSaved, isTestMode, onStartDiagnost
         <p className="disclaimer">Este diagnostico evalua la forma en que el perfil comunica publicamente sus capacidades de IA. No certifica el nivel tecnico real de la persona.</p>
       </section>
 
+      <ShareCardSection result={result} industry={form.industry} />
+
       <div className="results-actions">
         <button className="action-btn" onClick={copyJSON}><Copy size={15} /> {copied ? 'Copiado' : 'Copiar JSON'}</button>
         <button className="action-btn" onClick={downloadPDF}><Download size={15} /> Descargar informe</button>
@@ -579,6 +582,54 @@ function Results({ result, content, form, leadSaved, isTestMode, onStartDiagnost
       </div>
       {leadSaved && <div className="lead-saved"><CheckCircle2 size={14} /> Tu informe ha sido guardado. Te enviaremos el resultado a tu email.</div>}
     </main>
+  );
+}
+
+function ShareCardSection({ result, industry }: { result: ScoreResult; industry: Industry }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  const [ready, setReady] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReady(false);
+    renderShareCard({ score: result.total, level: result.level, percentileTop: result.percentileTop, industry }).then((canvas) => {
+      if (cancelled) return;
+      canvasElRef.current = canvas;
+      canvas.className = 'share-card-canvas';
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+        containerRef.current.appendChild(canvas);
+      }
+      setReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [result.total, result.level, result.percentileTop, industry]);
+
+  const handleDownload = () => {
+    if (canvasElRef.current) downloadCanvasAsPng(canvasElRef.current, 'ai-maturity-score.png');
+  };
+
+  const handleCopyText = () => {
+    navigator.clipboard.writeText(buildLinkedInPostText({ score: result.total, level: result.level, percentileTop: result.percentileTop, industry }));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <section className="share-card-section">
+      <span className="section-label">COMPARTE TU RESULTADO</span>
+      <h2>Presume tu posicion en LinkedIn</h2>
+      <p className="share-card-hint">Descarga la imagen y copia el texto. Ambos se suben a mano a tu post: LinkedIn no permite publicar en automatico desde aqui.</p>
+      <div className="share-card-layout">
+        <div className="share-card-preview" ref={containerRef}>{!ready && <div className="share-card-loading">Generando tarjeta...</div>}</div>
+        <div className="share-card-actions">
+          <button className="button button-gold" disabled={!ready} onClick={handleDownload}><Download size={16} /> Descargar imagen</button>
+          <button className="action-btn" onClick={handleCopyText}><Copy size={15} /> {copied ? 'Copiado' : 'Copiar texto del post'}</button>
+        </div>
+      </div>
+    </section>
   );
 }
 

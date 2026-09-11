@@ -293,3 +293,40 @@ button { cursor: pointer; }
 .test-mode-toggle { display: flex; align-items: center; gap: 8px; font: 11px 'DM Mono', monospace; color: #d9a441; background: #171310; border: 1px dashed #4a3a1f; padding: 10px 12px; margin-bottom: 14px; cursor: pointer; }
 .test-mode-toggle input { margin: 0; }
 .test-mode-banner { border-color: #4a3a1f; color: #d9a441; }
+
+/* Tarjeta compartible de LinkedIn (viralidad) */
+.share-card-section { padding: 30px 0; border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a; margin: 10px 0 30px; }
+.share-card-section h2 { font-family: 'Playfair Display', serif; font-size: 22px; margin: 8px 0 6px; }
+.share-card-hint { color: #999; font-size: 13px; max-width: 560px; margin: 0 0 20px; }
+.share-card-layout { display: flex; gap: 30px; align-items: flex-start; flex-wrap: wrap; }
+.share-card-preview { width: 220px; aspect-ratio: 4 / 5; background: #111; border: 1px solid #2a2a2a; display: flex; align-items: center; justify-content: center; flex: none; }
+.share-card-canvas { width: 220px; height: auto; display: block; }
+.share-card-loading { color: #706d67; font: 11px 'DM Mono', monospace; text-align: center; padding: 0 12px; }
+.share-card-actions { display: flex; flex-direction: column; gap: 10px; align-self: center; }
+@media (max-width: 600px) {
+  .share-card-layout { flex-direction: column; align-items: center; }
+}
+
+/* Panel interno de Cupperlab (?admin=1) */
+.admin-gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.admin-gate-card { max-width: 340px; width: 100%; text-align: center; }
+.admin-gate-card h1 { font-family: 'Playfair Display', serif; font-size: 26px; margin: 10px 0 20px; }
+.admin-gate-card input { width: 100%; background: #111; border: 1px solid #2a2a2a; color: #f4f1eb; padding: 12px 14px; font-size: 14px; margin-bottom: 14px; }
+.admin-panel { max-width: 1000px; margin: 0 auto; padding: 40px 24px 80px; }
+.admin-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px; }
+.admin-header h1 { font-family: 'Playfair Display', serif; font-size: 28px; margin: 8px 0 0; }
+.admin-list { display: grid; gap: 10px; }
+.admin-row { border: 1px solid #2a2a2a; background: #111; }
+.admin-row-summary { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 18px; background: none; border: none; color: inherit; cursor: pointer; text-align: left; flex-wrap: wrap; }
+.admin-row-main { display: flex; flex-direction: column; gap: 2px; }
+.admin-row-main strong { font-size: 14px; }
+.admin-row-main span { font-size: 12px; color: #999; }
+.admin-row-meta { display: flex; align-items: center; gap: 10px; font: 11px 'DM Mono', monospace; color: #999; }
+.admin-score { color: #D4AF37; font-weight: 700; }
+.admin-flag { background: #1a1611; border: 1px solid #4a3a1f; color: #D4AF37; padding: 3px 8px; }
+.admin-row-detail { border-top: 1px solid #2a2a2a; padding: 18px; display: grid; gap: 16px; }
+.admin-detail-block h3 { font-size: 13px; color: #D4AF37; margin: 0 0 8px; }
+.admin-detail-block p { font-size: 13px; color: #bbb; line-height: 1.6; margin: 0 0 6px; }
+.admin-flag-inline { color: #D4AF37 !important; }
+.admin-mini-report { background: #0a0a0a; border: 1px solid #2a2a2a; padding: 10px 12px; margin-top: 8px; }
+.admin-empty { color: #706d67; font-size: 13px; padding: 20px 0; text-align: center; }
