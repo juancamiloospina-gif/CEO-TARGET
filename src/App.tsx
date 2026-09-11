@@ -9,8 +9,9 @@ import { analyzeProfileWithClaude } from '@/lib/claudeAnalysis';
 import { demoProfiles } from '@/lib/demoProfiles';
 import { supabase } from '@/lib/supabase';
 import { extractPdfText } from '@/lib/pdf';
+import { getTier, pildoraCatalog, type Pildora } from '@/lib/pildoras';
 
-type Stage = 'landing' | 'analyzing' | 'results' | 'waitlist';
+type Stage = 'landing' | 'analyzing' | 'results' | 'pildora' | 'waitlist';
 type FormData = { linkedinUrl: string; pastedContent: string; pdfFile: File | null; email: string; industry: Industry; demoId: string | null };
 
 const industries: Industry[] = ['Retail', 'Tecnología', 'Finanzas', 'Consultoría', 'Salud', 'Educación', 'Manufactura', 'Product Management', 'Otro'];
@@ -98,12 +99,13 @@ function App() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [profileContent, setProfileContent] = useState<ProfileContent | null>(null);
   const [leadSaved, setLeadSaved] = useState(false);
+  const [interestSaved, setInterestSaved] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [analysisReady, setAnalysisReady] = useState(false);
 
-  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setAnalysisError(null); setIsSubmitting(false); setAnalysisReady(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
+  const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setInterestSaved(false); setAnalysisError(null); setIsSubmitting(false); setAnalysisReady(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
 
   const handleAnalyze = async () => {
     setAnalysisError(null);
@@ -192,8 +194,9 @@ function App() {
 
       {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} isSubmitting={isSubmitting} />}
       {stage === 'analyzing' && <Analyzing ready={analysisReady} onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setAnalysisError('No pudimos completar tu analisis. Intenta de nuevo.'); setStage('landing'); } }} />}
-      {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onWaitlist={() => setStage('waitlist')} onReset={reset} />}
-      {stage === 'waitlist' && <Waitlist email={form.email} onReset={reset} />}
+      {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onSeePildora={() => setStage('pildora')} onReset={reset} />}
+      {stage === 'pildora' && result && <PildoraSale pildora={pildoraCatalog[getTier(result.total)]} form={form} onInterested={() => registerPildoraInterest(form, pildoraCatalog[getTier(result.total)], setInterestSaved).then(() => setStage('waitlist'))} onBack={() => setStage('results')} />}
+      {stage === 'waitlist' && <Waitlist email={form.email} pildora={result ? pildoraCatalog[getTier(result.total)] : null} interestSaved={interestSaved} onReset={reset} />}
 
       <footer className="footer">
         <span>© 2024 Cupperlab AI Funnel</span>
@@ -223,6 +226,32 @@ async function saveLead(form: FormData, result: ScoreResult, content: ProfileCon
     });
     setLeadSaved(true);
   } catch { setLeadSaved(false); }
+}
+
+// Registra el interes en una pildora concreta. Todavia no hay pasarela de
+// pago conectada (Fase 2, primera version): en vez de simular un cobro que
+// no existe, dejamos constancia clara del interes para que el seguimiento
+// de pago se cierre manualmente, sin prometerle al prospecto un cobro que
+// no se esta procesando de verdad.
+async function registerPildoraInterest(form: FormData, pildora: Pildora, setInterestSaved: (v: boolean) => void) {
+  if (!supabase) { setInterestSaved(false); return; }
+  try {
+    await supabase.from('leads').insert({
+      email: form.email,
+      name: '',
+      industry: form.industry,
+      linkedin_url: form.linkedinUrl,
+      score: 0,
+      percentile: '',
+      level: '',
+      strengths: [],
+      weaknesses: [],
+      recommendations: [],
+      status: `Interesado en pildora "${pildora.title}" (${pildora.price}${pildora.currency === 'EUR' ? '€' : pildora.currency}) - pendiente de contacto y pago manual`,
+      source: 'AI Maturity Profile - Fase 2 (pildora)',
+    });
+    setInterestSaved(true);
+  } catch { setInterestSaved(false); }
 }
 
 function Landing({ form, setForm, onAnalyze, analysisError, onDismissError, isSubmitting }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void; analysisError: string | null; onDismissError: () => void; isSubmitting: boolean }) {
@@ -359,7 +388,7 @@ function Analyzing({ ready, onComplete }: { ready: boolean; onComplete: () => vo
   );
 }
 
-function Results({ result, content, form, leadSaved, onWaitlist, onReset }: { result: ScoreResult; content: ProfileContent | null; form: FormData; leadSaved: boolean; onWaitlist: () => void; onReset: () => void }) {
+function Results({ result, content, form, leadSaved, onSeePildora, onReset }: { result: ScoreResult; content: ProfileContent | null; form: FormData; leadSaved: boolean; onSeePildora: () => void; onReset: () => void }) {
   const [copied, setCopied] = useState(false);
   const [animatedScore, setAnimatedScore] = useState(0);
   const industryAvg = 45;
@@ -457,14 +486,18 @@ function Results({ result, content, form, leadSaved, onWaitlist, onReset }: { re
 
       <section className="cta-conversion">
         <div>
-          <span className="section-label">¿QUIERES SUBIR TU POSICION?</span>
-          <h2>¿Quieres subir tu posicion en el ranking de tu industria?</h2>
-          <p>Hemos diseñado un sistema practico para que en pocas semanas puedas:</p>
-          <div className="cta-features"><span><Check size={14} /> Optimizar tu posicionamiento publico en IA</span><span><Check size={14} /> Construir autoridad real en tu sector</span><span><Check size={14} /> Destacar frente a tus competidores</span></div>
+          <span className="section-label">TU SIGUIENTE PASO</span>
+          <h2>{pildoraCatalog[getTier(result.total)].tagline}</h2>
+          <p>{pildoraCatalog[getTier(result.total)].promise}</p>
+          <div className="cta-features">
+            {pildoraCatalog[getTier(result.total)].modules.slice(0, 3).map((m, i) => (
+              <span key={i}><Check size={14} /> {m.title}</span>
+            ))}
+          </div>
         </div>
         <div className="cta-action">
-          <button className="button button-gold" onClick={onWaitlist}>Quiero mejorar mi posicionamiento en IA <ArrowRight size={16} /></button>
-          <p className="cta-microcopy">Plazas limitadas. Te avisaremos cuando abramos la proxima cohorte.</p>
+          <button className="button button-gold" onClick={onSeePildora}>Ver "{pildoraCatalog[getTier(result.total)].title}" <ArrowRight size={16} /></button>
+          <p className="cta-microcopy">{pildoraCatalog[getTier(result.total)].price}€ · {pildoraCatalog[getTier(result.total)].format}</p>
         </div>
       </section>
 
@@ -506,19 +539,82 @@ function CategoryCard({ title, score, max, tooltip }: { title: string; score: nu
   );
 }
 
-function Waitlist({ email, onReset }: { email: string; onReset: () => void }) {
+function PildoraSale({ pildora, form, onInterested, onBack }: { pildora: Pildora; form: FormData; onInterested: () => void; onBack: () => void }) {
+  const [sending, setSending] = useState(false);
+
+  const handleInterested = () => {
+    setSending(true);
+    onInterested();
+  };
+
+  return (
+    <main className="pildora-sale page-wrap">
+      <button className="back-link" onClick={onBack}><ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /> Volver a mi informe</button>
+
+      <div className="pildora-hero">
+        <span className="section-label">PILDORA RECOMENDADA PARA TU PERFIL</span>
+        <h1>{pildora.title}</h1>
+        <p className="pildora-tagline">{pildora.tagline}</p>
+        <p className="pildora-for-whom">{pildora.forWhom}</p>
+      </div>
+
+      <section className="pildora-promise">
+        <h2>Que vas a lograr</h2>
+        <p>{pildora.promise}</p>
+      </section>
+
+      <section className="pildora-modules">
+        <h2>Contenido de la pildora</h2>
+        <div className="pildora-modules-list">
+          {pildora.modules.map((m, i) => (
+            <div key={i} className="pildora-module">
+              <span className="rec-number">0{i + 1}</span>
+              <div>
+                <h3>{m.title}</h3>
+                <p>{m.description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="pildora-bonus">
+        <span className="section-label">BONUS INCLUIDO</span>
+        <p>{pildora.bonus}</p>
+      </section>
+
+      <section className="pildora-buy">
+        <div className="pildora-price-block">
+          <span className="pildora-price">{pildora.price}€</span>
+          <span className="pildora-format">{pildora.format} · {pildora.durationEstimate}</span>
+        </div>
+        <button className="button button-gold wide-button" disabled={sending} onClick={handleInterested}>
+          {sending ? 'Registrando tu interes...' : <>Quiero esta pildora <ArrowRight size={16} /></>}
+        </button>
+        <p className="cta-microcopy">Registramos tu interes con <strong>{form.email}</strong>. Te contactamos en menos de 24h con el enlace de pago (todavia no procesamos el cobro automaticamente).</p>
+      </section>
+    </main>
+  );
+}
+
+function Waitlist({ email, pildora, interestSaved, onReset }: { email: string; pildora: Pildora | null; interestSaved: boolean; onReset: () => void }) {
   return (
     <main className="waitlist page-wrap">
       <div className="waitlist-card">
         <div className="waitlist-icon"><CheckCircle2 size={32} /></div>
-        <span className="section-label">LISTA DE ESPERA</span>
-        <h1>Gracias. Tu plaza esta reservada.</h1>
-        <p>Te avisaremos cuando abramos la proxima cohorte. Mientras tanto, te enviaremos recursos exclusivos a <strong>{email}</strong>.</p>
+        <span className="section-label">{pildora ? 'INTERES REGISTRADO' : 'LISTA DE ESPERA'}</span>
+        <h1>{pildora ? `Listo. Reservamos tu cupo en "${pildora.title}".` : 'Gracias. Tu plaza esta reservada.'}</h1>
+        <p>
+          {pildora
+            ? <>Te escribimos a <strong>{email}</strong> en menos de 24h con el enlace de pago para cerrar tu acceso ({pildora.price}€).</>
+            : <>Te avisaremos cuando abramos la proxima cohorte. Mientras tanto, te enviaremos recursos exclusivos a <strong>{email}</strong>.</>}
+        </p>
         <div className="waitlist-features">
           <div><TrendingUp size={18} /> <span>Recibiras recursos exclusivos sobre IA aplicada</span></div>
           <div><BarChart3 size={18} /> <span>Acceso prioritario a la proxima cohorte</span></div>
           <div><Clock3 size={18} /> <span>Sin compromiso · Puedes darte de baja cuando quieras</span></div>
         </div>
+        {pildora && !interestSaved && <p className="analysis-error">No pudimos confirmar el registro automatico esta vez. Escribenos directamente y lo resolvemos manualmente.</p>}
         <button className="button button-gold" onClick={onReset}>Volver al inicio <ArrowRight size={16} /></button>
       </div>
     </main>

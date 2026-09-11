@@ -239,3 +239,29 @@ button { cursor: pointer; }
   .comp-marker span { font-size: 8px; }
   .waitlist-card h1 { font-size: 28px; }
 }
+
+/* Fase 2: pagina de venta de pildora */
+.pildora-sale { padding-bottom: 60px; }
+.back-link { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: #a5967a; font: 12px 'DM Mono', monospace; cursor: pointer; padding: 0; margin: 24px 0 20px; }
+.back-link:hover { color: #D4AF37; }
+.pildora-hero { padding: 30px 0 20px; border-bottom: 1px solid #2a2a2a; }
+.pildora-hero h1 { font-family: 'Playfair Display', serif; font-size: 34px; margin: 10px 0 8px; }
+.pildora-tagline { color: #D4AF37; font-size: 15px; margin: 0 0 10px; }
+.pildora-for-whom { color: #999; font-size: 13px; line-height: 1.6; max-width: 640px; margin: 0; }
+.pildora-promise, .pildora-modules, .pildora-bonus { padding: 28px 0; border-bottom: 1px solid #2a2a2a; }
+.pildora-promise h2, .pildora-modules h2 { font-family: 'Playfair Display', serif; font-size: 22px; margin: 0 0 14px; }
+.pildora-promise p { color: #bbb; font-size: 14px; line-height: 1.7; max-width: 680px; }
+.pildora-modules-list { display: grid; gap: 12px; }
+.pildora-module { display: flex; gap: 16px; padding: 18px; border: 1px solid #2a2a2a; background: #111; }
+.pildora-module h3 { font-size: 14px; margin: 0 0 6px; color: #eee; }
+.pildora-module p { font-size: 13px; color: #999; line-height: 1.6; margin: 0; }
+.pildora-bonus { border-bottom: none; }
+.pildora-bonus p { color: #bbb; font-size: 13px; line-height: 1.6; margin: 6px 0 0; max-width: 640px; }
+.pildora-buy { padding: 30px; background: linear-gradient(135deg, #1a1611, #111); border: 1px solid #3d3422; text-align: center; margin-top: 10px; }
+.pildora-price-block { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 18px; }
+.pildora-price { font-family: 'Playfair Display', serif; font-size: 40px; color: #D4AF37; }
+.pildora-format { color: #999; font-size: 12px; }
+.pildora-buy .cta-microcopy { max-width: 480px; margin: 14px auto 0; }
+@media (max-width: 720px) {
+  .pildora-hero h1 { font-size: 26px; }
+}
