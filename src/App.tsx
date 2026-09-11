@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { extractPdfText } from '@/lib/pdf';
 import {
   type Bottleneck, type BusinessDiagnosticAnswers, type MiniReport, type TeamSize, type ToolLevel, type Urgency,
-  bottleneckOptions, teamSizeOptions, toolLevelOptions, urgencyOptions,
+  bottleneckOptions, buildFallbackMiniReport, teamSizeOptions, toolLevelOptions, urgencyOptions,
 } from '@/lib/businessDiagnostic';
 import { generateMiniReport } from '@/lib/claudeBusinessAnalysis';
 
@@ -112,6 +112,11 @@ function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [analysisReady, setAnalysisReady] = useState(false);
+  // Modo prueba: SOLO existe en `npm run dev` (import.meta.env.DEV es false
+  // en el build de produccion, asi que este toggle desaparece solo al
+  // publicar). Permite ver todo el flujo (Fase 1 y Fase 2) sin llamar a
+  // Claude ni gastar creditos, y sin escribir filas de prueba en Supabase.
+  const [isTestMode, setIsTestMode] = useState(false);
 
   const reset = () => { setStage('landing'); setResult(null); setProfileContent(null); setLeadSaved(false); setMiniReport(null); setWantsContact(false); setDiagnosticSaved(false); setAnalysisError(null); setIsSubmitting(false); setAnalysisReady(false); setForm({ linkedinUrl: '', pastedContent: '', pdfFile: null, email: '', industry: 'Tecnología', demoId: null }); };
 
@@ -168,7 +173,9 @@ function App() {
     // "Analizando", nunca antes de mostrarla.
     setStage('analyzing');
     try {
-      const claudeOutcome = await analyzeProfileWithClaude(content, industry);
+      // Perfiles de demo y modo prueba nunca llaman a Claude: son solo para
+      // ver la interfaz funcionando, no para validar el score real.
+      const claudeOutcome = (form.demoId || isTestMode) ? null : await analyzeProfileWithClaude(content, industry);
       const score = claudeOutcome
         ? buildResult(claudeOutcome.scores, content, industry, {
             strengths: claudeOutcome.strengths,
@@ -200,9 +207,9 @@ function App() {
         </div>
       </header>
 
-      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} isSubmitting={isSubmitting} />}
-      {stage === 'analyzing' && <Analyzing ready={analysisReady} onComplete={() => { if (result) { saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setAnalysisError('No pudimos completar tu analisis. Intenta de nuevo.'); setStage('landing'); } }} />}
-      {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} onStartDiagnostic={() => setStage('diagnostic')} onReset={reset} />}
+      {stage === 'landing' && <Landing form={form} setForm={setForm} onAnalyze={handleAnalyze} analysisError={analysisError} onDismissError={() => setAnalysisError(null)} isSubmitting={isSubmitting} isTestMode={isTestMode} setIsTestMode={setIsTestMode} />}
+      {stage === 'analyzing' && <Analyzing ready={analysisReady} onComplete={() => { if (result) { if (!form.demoId && !isTestMode) saveLead(form, result, profileContent, setLeadSaved); setStage('results'); } else { setAnalysisError('No pudimos completar tu analisis. Intenta de nuevo.'); setStage('landing'); } }} />}
+      {stage === 'results' && result && <Results result={result} content={profileContent} form={form} leadSaved={leadSaved} isTestMode={isTestMode} onStartDiagnostic={() => setStage('diagnostic')} onReset={reset} />}
       {stage === 'diagnostic' && (
         <BusinessDiagnosticForm
           answers={diagnosticAnswers}
@@ -214,9 +221,15 @@ function App() {
           onSubmit={async () => {
             setIsGeneratingReport(true);
             try {
-              const report = await generateMiniReport(diagnosticAnswers, form.industry, result?.total ?? null, result?.level ?? null);
+              const report = (form.demoId || isTestMode)
+                ? buildFallbackMiniReport(diagnosticAnswers.bottleneck)
+                : await generateMiniReport(diagnosticAnswers, form.industry, result?.total ?? null, result?.level ?? null);
               setMiniReport(report);
-              await saveBusinessDiagnostic(form, diagnosticAnswers, result, report, wantsContact, setDiagnosticSaved);
+              if (!form.demoId && !isTestMode) {
+                await saveBusinessDiagnostic(form, diagnosticAnswers, result, report, wantsContact, setDiagnosticSaved);
+              } else {
+                setDiagnosticSaved(true);
+              }
               setStage('mini-report');
             } finally {
               setIsGeneratingReport(false);
@@ -225,7 +238,7 @@ function App() {
         />
       )}
       {stage === 'mini-report' && miniReport && (
-        <MiniReportView report={miniReport} wantsContact={wantsContact} diagnosticSaved={diagnosticSaved} onReset={reset} />
+        <MiniReportView report={miniReport} wantsContact={wantsContact} diagnosticSaved={diagnosticSaved} isTestMode={isTestMode} onReset={reset} />
       )}
 
       <footer className="footer">
@@ -296,7 +309,7 @@ async function saveBusinessDiagnostic(
   } catch { setDiagnosticSaved(false); }
 }
 
-function Landing({ form, setForm, onAnalyze, analysisError, onDismissError, isSubmitting }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void; analysisError: string | null; onDismissError: () => void; isSubmitting: boolean }) {
+function Landing({ form, setForm, onAnalyze, analysisError, onDismissError, isSubmitting, isTestMode, setIsTestMode }: { form: FormData; setForm: (f: FormData) => void; onAnalyze: () => void; analysisError: string | null; onDismissError: () => void; isSubmitting: boolean; isTestMode: boolean; setIsTestMode: (v: boolean) => void }) {
   const [visitorCount] = useState(() => 1247 + Math.floor(Math.random() * 300));
   const [showDemo, setShowDemo] = useState(false);
   const canAnalyze = form.demoId ? true : (form.linkedinUrl.trim().length > 0 || form.pastedContent.trim().length > 0 || !!form.pdfFile) && form.email.trim().length > 0;
@@ -322,6 +335,13 @@ function Landing({ form, setForm, onAnalyze, analysisError, onDismissError, isSu
       <div className="form-section">
         <div className="form-card">
           <div className="form-header"><span className="section-label">ANALISIS DE PERFIL</span><h2>Tu AI Maturity Score en 2 minutos</h2></div>
+
+          {import.meta.env.DEV && (
+            <label className="test-mode-toggle">
+              <input type="checkbox" checked={isTestMode} onChange={(e) => setIsTestMode(e.target.checked)} />
+              <span>Modo prueba (no llama a Claude, no gasta creditos, no guarda nada)</span>
+            </label>
+          )}
 
           <div className="demo-bar">
             <button className={showDemo ? 'demo-toggle active' : 'demo-toggle'} onClick={() => setShowDemo(!showDemo)}>
@@ -430,7 +450,7 @@ function Analyzing({ ready, onComplete }: { ready: boolean; onComplete: () => vo
   );
 }
 
-function Results({ result, content, form, leadSaved, onStartDiagnostic, onReset }: { result: ScoreResult; content: ProfileContent | null; form: FormData; leadSaved: boolean; onStartDiagnostic: () => void; onReset: () => void }) {
+function Results({ result, content, form, leadSaved, isTestMode, onStartDiagnostic, onReset }: { result: ScoreResult; content: ProfileContent | null; form: FormData; leadSaved: boolean; isTestMode: boolean; onStartDiagnostic: () => void; onReset: () => void }) {
   const [copied, setCopied] = useState(false);
   const [animatedScore, setAnimatedScore] = useState(0);
   const industryAvg = 45;
@@ -470,6 +490,7 @@ function Results({ result, content, form, leadSaved, onStartDiagnostic, onReset 
   return (
     <main className="results page-wrap">
       {form.demoId && <div className="demo-banner"><Info size={14} /> Este es un perfil de demostracion. Los datos mostrados son ficticios y sirven para ilustrar el funcionamiento de la herramienta.</div>}
+      {isTestMode && !form.demoId && <div className="demo-banner test-mode-banner"><Info size={14} /> MODO PRUEBA: este score es del motor deterministico local, no de Claude. No se guardo ningun dato.</div>}
 
       <div className="results-hero">
         <div>
@@ -654,10 +675,11 @@ function DiagnosticQuestion({ label, children }: { label: string; children: Reac
   );
 }
 
-function MiniReportView({ report, wantsContact, diagnosticSaved, onReset }: { report: MiniReport; wantsContact: boolean; diagnosticSaved: boolean; onReset: () => void }) {
+function MiniReportView({ report, wantsContact, diagnosticSaved, isTestMode, onReset }: { report: MiniReport; wantsContact: boolean; diagnosticSaved: boolean; isTestMode: boolean; onReset: () => void }) {
   return (
     <main className="mini-report page-wrap">
       <div className="mini-report-card">
+        {isTestMode && <div className="demo-banner test-mode-banner"><Info size={14} /> MODO PRUEBA: reporte generado localmente, sin llamar a Claude. No se guardo ningun dato.</div>}
         <span className="section-label">TU DIAGNOSTICO</span>
         <h1>{report.headline}</h1>
 

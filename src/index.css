@@ -288,3 +288,8 @@ button { cursor: pointer; }
   .diagnostic-hero h1 { font-size: 24px; }
   .mini-report-card > h1 { font-size: 22px; }
 }
+
+/* Modo prueba (solo visible en npm run dev) */
+.test-mode-toggle { display: flex; align-items: center; gap: 8px; font: 11px 'DM Mono', monospace; color: #d9a441; background: #171310; border: 1px dashed #4a3a1f; padding: 10px 12px; margin-bottom: 14px; cursor: pointer; }
+.test-mode-toggle input { margin: 0; }
+.test-mode-banner { border-color: #4a3a1f; color: #d9a441; }
