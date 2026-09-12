@@ -802,13 +802,17 @@ function ConsultingCTA({ wantsContact }: { wantsContact: boolean }) {
 
   return (
     <section className="consulting-cta">
-      <span className="section-label">TU SIGUIENTE PASO</span>
-      <h2>¿Resolvemos esto juntos?</h2>
-      <p>Con lo que nos contaste ya podemos ver por donde empezar. Una llamada corta basta para saber si tiene sentido trabajar juntos — sin compromiso.</p>
-      <a className="button button-gold wide-button" href={mailtoHref}><Mail size={16} /> Quiero agendar esa llamada</a>
-      {wantsContact && (
-        <p className="consulting-cta-note"><CheckCircle2 size={14} /> Ya nos pediste contacto directo — te escribimos pronto de todas formas.</p>
-      )}
+      <div>
+        <span className="section-label">TU SIGUIENTE PASO</span>
+        <h2>¿Resolvemos esto juntos?</h2>
+        <p>Con lo que nos contaste ya podemos ver por donde empezar. Una llamada corta basta para saber si tiene sentido trabajar juntos — sin compromiso.</p>
+      </div>
+      <div className="cta-action">
+        <a className="button button-gold wide-button" href={mailtoHref}><Mail size={16} /> Quiero agendar esa llamada</a>
+        {wantsContact && (
+          <p className="consulting-cta-note"><CheckCircle2 size={14} /> Ya nos pediste contacto directo — te escribimos pronto de todas formas.</p>
+        )}
+      </div>
     </section>
   );
 }
