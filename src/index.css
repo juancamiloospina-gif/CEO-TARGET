@@ -302,14 +302,6 @@ button { cursor: pointer; }
 .consulting-cta .wide-button { width: 100%; }
 .consulting-cta-note { display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: #D4AF37; font-size: 12px; margin: 14px 0 0; text-align: right; }
 
-.courses-teaser { width: 100%; max-width: 620px; display: flex; align-items: center; gap: 10px; background: #111; border: 1px solid #222; padding: 14px 16px; color: #706d67; }
-.courses-teaser p { flex: 1; font-size: 12px; line-height: 1.5; margin: 0; }
-.courses-teaser p b { color: #ccc; font-weight: 600; }
-.courses-teaser a { color: #D4AF37; font-size: 12px; font-weight: 600; white-space: nowrap; text-decoration: none; }
-.courses-teaser a:hover { text-decoration: underline; }
-@media (max-width: 640px) {
-  .courses-teaser { flex-wrap: wrap; }
-}
 
 /* Modo prueba (solo visible en npm run dev) */
 .test-mode-toggle { display: flex; align-items: center; gap: 8px; font: 11px 'DM Mono', monospace; color: #d9a441; background: #171310; border: 1px dashed #4a3a1f; padding: 10px 12px; margin-bottom: 14px; cursor: pointer; }

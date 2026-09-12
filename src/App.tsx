@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowRight, Check, CheckCircle2, ChevronRight,
   Copy, Download, FileText, Globe2, Info, Link2, Lock, Mail, Menu,
-  PlayCircle, Radar, ScanLine, Sparkles, Upload, UserRound, X, Zap,
+  Radar, ScanLine, Sparkles, Upload, UserRound, X, Zap,
 } from 'lucide-react';
 import { analyzeProfile, buildResult, type Industry, type ProfileContent, type ScoreResult } from '@/lib/scoring';
 import { analyzeProfileWithClaude } from '@/lib/claudeAnalysis';
@@ -15,7 +15,6 @@ import {
 } from '@/lib/businessDiagnostic';
 import { generateMiniReport } from '@/lib/claudeBusinessAnalysis';
 import { buildLinkedInPostText, downloadCanvasAsPng, renderShareCard } from '@/lib/shareCard';
-import { getCourseForBottleneck } from '@/lib/courses';
 
 type Stage = 'landing' | 'analyzing' | 'results' | 'diagnostic' | 'mini-report';
 type FormData = { linkedinUrl: string; pastedContent: string; pdfFile: File | null; email: string; industry: Industry; demoId: string | null };
@@ -250,13 +249,17 @@ function App() {
         />
       )}
       {stage === 'mini-report' && miniReport && (
-        <MiniReportView report={miniReport} bottleneck={diagnosticAnswers.bottleneck} wantsContact={wantsContact} diagnosticSaved={diagnosticSaved} isTestMode={isTestMode} onReset={reset} />
+        <MiniReportView report={miniReport} wantsContact={wantsContact} diagnosticSaved={diagnosticSaved} isTestMode={isTestMode} onReset={reset} />
       )}
 
       <footer className="footer">
         <span>© 2024 Cupperlab AI Funnel</span>
         <span>Este diagnostico evalua la forma en que el perfil comunica publicamente sus capacidades de IA. No certifica el nivel tecnico real de la persona.</span>
-        <span><a className="privacy-link" href="mailto:juancamilo@cupperlab.com?subject=Solicitud%20de%20eliminacion%20de%20datos%20(GDPR)&body=Hola%2C%20quiero%20solicitar%20la%20eliminacion%20de%20mis%20datos%20personales%20almacenados%20en%20AI%20Maturity%20Profile.%20Mi%20email%20registrado%20es%3A%20">Solicitar eliminacion de mis datos (GDPR)</a></span>
+        <span>
+          <a className="privacy-link" href="mailto:juancamilo@cupperlab.com?subject=Solicitud%20de%20eliminacion%20de%20datos%20(GDPR)&body=Hola%2C%20quiero%20solicitar%20la%20eliminacion%20de%20mis%20datos%20personales%20almacenados%20en%20AI%20Maturity%20Profile.%20Mi%20email%20registrado%20es%3A%20">Solicitar eliminacion de mis datos (GDPR)</a>
+          {' · '}
+          <a className="privacy-link" href="mailto:juancamilo@cupperlab.com?subject=Quiero%20informacion%20sobre%20los%20cursos%20de%20IA%20de%20Cupperlab&body=Hola%2C%20quiero%20mas%20informacion%20sobre%20el%20catalogo%20de%20cursos%20de%20IA%20de%20Cupperlab.">Cursos de IA por area</a>
+        </span>
       </footer>
     </div>
   );
@@ -756,7 +759,7 @@ function DiagnosticQuestion({ label, children }: { label: string; children: Reac
   );
 }
 
-function MiniReportView({ report, bottleneck, wantsContact, diagnosticSaved, isTestMode, onReset }: { report: MiniReport; bottleneck: Bottleneck; wantsContact: boolean; diagnosticSaved: boolean; isTestMode: boolean; onReset: () => void }) {
+function MiniReportView({ report, wantsContact, diagnosticSaved, isTestMode, onReset }: { report: MiniReport; wantsContact: boolean; diagnosticSaved: boolean; isTestMode: boolean; onReset: () => void }) {
   return (
     <main className="mini-report page-wrap">
       <div className="mini-report-card">
@@ -781,8 +784,6 @@ function MiniReportView({ report, bottleneck, wantsContact, diagnosticSaved, isT
       </div>
 
       <ConsultingCTA wantsContact={wantsContact} />
-
-      <CoursesTeaser bottleneck={bottleneck} />
 
       <div className="mini-report-back">
         <button className="button button-gold" onClick={onReset}>Volver al inicio <ArrowRight size={16} /></button>
@@ -813,22 +814,6 @@ function ConsultingCTA({ wantsContact }: { wantsContact: boolean }) {
           <p className="consulting-cta-note"><CheckCircle2 size={14} /> Ya nos pediste contacto directo — te escribimos pronto de todas formas.</p>
         )}
       </div>
-    </section>
-  );
-}
-
-// El curso del bottleneck declarado sigue existiendo, pero como oferta
-// secundaria de ticket pequeno: una linea, no el temario completo. La
-// consultoria (arriba) es la conversion principal de esta pagina.
-function CoursesTeaser({ bottleneck }: { bottleneck: Bottleneck }) {
-  const recommended = getCourseForBottleneck(bottleneck);
-  const mailtoHref = `mailto:juancamilo@cupperlab.com?subject=${encodeURIComponent(`Quiero acceso al curso: ${recommended.title}`)}&body=${encodeURIComponent('Hola, acabo de hacer mi diagnostico de negocio con Cupperlab y quiero mas informacion sobre este curso.')}`;
-
-  return (
-    <section className="courses-teaser">
-      <PlayCircle size={16} />
-      <p>¿Prefieres aprender a tu ritmo primero? Tenemos <b>{recommended.title}</b>, enfocado justo en esto.</p>
-      <a href={mailtoHref}>Ver detalles</a>
     </section>
   );
 }
